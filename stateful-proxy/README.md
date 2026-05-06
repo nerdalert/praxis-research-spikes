@@ -4,9 +4,9 @@
 
 ## Summary
 
-Praxis needs a deliberate state architecture before more features start adding their own storage patterns. The current codebase has request-local metadata, local counters, local load-balancer state, local health state, and static or hot-reloaded configuration. That is enough for a basic proxy, but not enough for the feature set represented by the current open issue backlog.
+Praxis needs a align on state architecture before more features start adding their own storage patterns. The current codebase has request-local metadata, local counters, local load-balancer state, local health state, and static or hot-reloaded configuration. That is enough for a basic proxy, but not enough for the feature set represented by the current open issue backlog.
 
-The problem is not simply that Praxis needs Redis. The problem is that Praxis needs a clear model for **which state belongs where**:
+Before implementing Redis, Praxis needs to define boundaries for where different types of state should reside.
 
 - Some state is request-local and should never leave memory.
 - Some state is local runtime state and can be safely lost on restart.
@@ -26,16 +26,16 @@ This spike proposes a layered model:
 
 The recommended first implementation path is **not** a generic global key-value map. Start with typed state traits around concrete needs: rate-limit counters, token ledgers, protocol sessions, task ownership, policy decision cache, routing scorer snapshots, and usage event export.
 
-## Issue Scope
+## Task Scope
 
-Issue #99 asks for an analysis of the state management Praxis needs, and for a proposal discussion that includes:
+The spike asks for an analysis of the state management Praxis needs, and for a proposal discussion that includes:
 
 - A table of all state and related features Praxis needs to support.
 - Local mechanisms for storing that state.
 - External mechanisms for storing that state.
 - Enough detail to build consensus before implementation.
 
-This document is intended to be that proposal draft. It does not implement the state layer.
+This document is intended to be that proposal draft. It does not implement the state layer. There is a starter [implementation plan](implementation-plan.md) to help get a feel for a concrete action with the proposal.
 
 ## Problem Statement
 
