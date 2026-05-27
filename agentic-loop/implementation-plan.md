@@ -1,3 +1,319 @@
+
+# Proposed Praxis Implementation: Responses API and Agentic Response Orchestration
+
+## Core Decision
+
+Praxis should support two explicit Responses API modes:
+
+1. **Native pass-through mode** for backends that already support `/v1/responses`.
+2. **Praxis-owned agentic orchestration mode** for deployments where Praxis is responsible for conversation state, approved local tool execution, guardrails, and repeated model calls.
+
+These modes should be selected by configuration or routing policy. The presence of request fields such as `tools`, `store`, `conversation`, or `previous_response_id` should not automatically make Praxis take ownership of the workflow, because a native Responses backend may already support those fields correctly.
+
+## Mode 1: Native Responses Pass-Through
+
+In pass-through mode, Praxis acts as a transparent proxy for Responses API traffic.
+
+```text
+Client
+  -> Praxis classification/routing
+  -> Responses-capable backend
+  -> Client
+```
+
+Requirements:
+
+- Detect Responses requests for routing purposes without mutating the body.
+- Preserve request bytes exactly, including unknown forward-compatible fields.
+- Preserve fields such as `tools`, `tool_choice`, `store`, `conversation`, `previous_response_id`, `stream`, and encrypted or opaque reasoning content.
+- Forward non-streaming responses unchanged.
+- Forward SSE streaming responses unchanged.
+- Do not parse, normalize, persist, execute tools, or claim ownership of the agent loop in this mode.
+
+The classifier may expose small bounded routing facts such as API format, model name, `stream`, `store`, or the presence of continuation fields. Those facts are for routing and policy only.
+
+## Mode 2: Praxis-Owned Agentic Response Orchestration
+
+In agentic mode, Praxis owns the complete model/tool/model workflow.
+
+```text
+Client
+  -> Praxis classifier and policy selection
+  -> agentic response orchestrator
+       -> load stored conversation state when needed
+       -> run input guardrails
+       -> call the configured model backend
+       -> inspect the model response
+       -> validate any requested tool calls
+       -> execute approved local tools
+       -> validate tool results
+       -> inject tool outputs into the next model request
+       -> call the model again
+       -> repeat until final answer or limit
+       -> persist state when requested
+       -> return the final response to the client
+```
+
+The orchestrator is implemented as a terminal request-phase filter, such as `responses_orchestrator`, which owns internal subrequests and returns a local response when processing is complete.
+
+## Why The Agentic Response Orchestrator Is Required
+
+Praxis branch-chain re-entry currently works only before a normal upstream response exists. It cannot pause a model response, execute a tool, issue another model request, and then substitute the final answer returned to the client.
+
+An agent loop requires exactly that behavior:
+
+```text
+User asks a question
+  -> model requests a tool
+  -> Praxis executes the approved tool
+  -> Praxis sends the result back to the model
+  -> model returns the final answer
+  -> Praxis replies to the user
+```
+
+Because this flow cannot currently be implemented through ordinary response-phase filters and branch-chain re-entry, the stateful path must be owned by the agentic response orchestrator.
+
+This does not mean the implementation should be monolithic. Parsing, state access, tool policy, tool adapters, streaming parsing, guardrails, and persistence should still be separate testable Rust modules used by the orchestrator.
+
+## Request Classification And Routing
+
+Praxis should include a body-aware Responses classifier that:
+
+- Identifies Responses API requests versus Chat Completions traffic.
+- Extracts bounded routing facts such as model name, streaming mode and state-related field presence.
+- Preserves the original request body unchanged.
+- Provides facts for routing into either native pass-through mode or Praxis-owned agentic mode.
+
+The classifier should not decide that Praxis owns the workflow solely because a request contains tools or continuation fields. Ownership must be intentional and configured.
+
+## Agent Loop Behavior
+
+For a Praxis-owned agent request, the orchestrator should:
+
+1. Parse and validate the incoming Responses request.
+2. Determine the configured inference backend for the selected model.
+3. Load prior context when `previous_response_id` or conversation state is used.
+4. Run initial guardrails on user input and retrieved context.
+5. Submit an inference subrequest to the model backend.
+6. Parse the response for final output or tool-call items.
+7. If the response is final, persist it when required and return it.
+8. If the response requests tools, validate all requested tools before executing any of them.
+9. Execute only tools Praxis is authorized to execute locally.
+10. Run guardrails on tool output before reinserting it into model context.
+11. Inject correlated `function_call_output` items using the original `call_id`.
+12. Submit another inference subrequest.
+13. Continue until final output, timeout, maximum iterations, maximum tool calls, or another controlled failure condition.
+
+## Tool Ownership And Execution Policy
+
+A tool appearing in the model request does not automatically mean Praxis may execute it.
+
+Praxis must distinguish between:
+
+| Tool Type | Owner | Praxis Behavior |
+| --- | --- | --- |
+| Client-owned function tool | Calling application | Return the approved tool call to the client when configured for client execution. |
+| Provider-owned/native tool | Responses-capable backend | Preserve it in native pass-through mode, or explicitly delegate it in agentic mode. |
+| Praxis-owned local tool | Praxis configuration | Execute it locally inside the agentic response orchestrator. |
+| Unknown or unadvertised tool | Nobody authorized | Reject or fail closed by default. |
+
+For local execution, both conditions must be true:
+
+1. The tool was intentionally advertised to the model for this request.
+2. Praxis configuration authorizes local execution of that tool and identifies its backend.
+
+The model should receive only the tools allowed for that request, not Praxis's entire global tool catalog.
+
+Tool calls must be validated before execution so that one permitted tool is not executed before another invalid or unauthorized call is discovered.
+
+## State Management
+
+The stateful workflow requires substantial structured state, including:
+
+- Original request information.
+- Conversation transcript.
+- Prior response references.
+- Tool definitions and policy decisions.
+- Pending tool calls and results.
+- Model output items.
+- Usage and status information.
+- Streaming buffers.
+
+This data must not be stored in `filter_metadata`. Praxis metadata is intended for small bounded routing facts and identifiers, not complete requests, conversations, tool outputs, or streamed response bodies.
+
+The design should use:
+
+- A typed request-scoped loop state object owned by the orchestrator.
+- A typed response/conversation state store for durable state.
+- Small metadata values only for identifiers and routing facts, such as mode, response ID, tenant ID or status.
+
+State requirements include:
+
+- Store the full transcript required to continue a conversation correctly.
+- Honor `store: true` and `store: false`.
+- Return a controlled error for missing or inaccessible `previous_response_id`.
+- Include tenant, user or session scoping in state keys.
+- Define TTL and retention behavior.
+- Support a local implementation first and external durable backends through an abstraction.
+
+## Internal Subrequests
+
+Stateful orchestration requires Praxis to make internal calls to:
+
+- The inference backend.
+- Approved local tool backends.
+- MCP services.
+- Conversation/state services.
+- File, search or vector-store services.
+
+These calls should be made through a generic `SubRequestClient` abstraction rather than directly embedding a new HTTP client throughout agentic filters.
+
+The subrequest layer should provide:
+
+- Timeout enforcement.
+- Maximum request and response byte limits.
+- Header allowlists and reserved-header protection.
+- Parent request and tracing propagation.
+- Cancellation behavior.
+- Metrics and controlled error mapping.
+- Connection pooling and TLS behavior compatible with Praxis.
+
+The e2e spike demonstrated that direct `reqwest` usage can conflict with the existing Pingora/rustls TLS path. The upstream implementation must resolve that through the subrequest abstraction before agentic execution depends on it.
+
+## Guardrail Placement
+
+Guardrails must be part of the loop, not only an initial input check.
+
+Required guardrail points:
+
+| Point | Purpose |
+| --- | --- |
+| Before initial inference | Validate user input and loaded conversation context. |
+| After model response | Validate model output and requested tool calls. |
+| Before tool execution | Validate tool name, arguments and execution policy. |
+| After tool execution | Validate tool result before the model receives it. |
+| Before each reinference call | Validate the updated conversation after injected tool results. |
+| Before final client response | Validate the final output returned downstream. |
+
+A tool result can contain unsafe or untrusted content. It must not be automatically injected back into the model without policy and guardrail checks.
+
+## Streaming Policy
+
+Streaming behavior differs by ownership mode.
+
+### Stateless Streaming
+
+For native pass-through mode:
+
+- Forward upstream SSE events unchanged.
+- Preserve event ordering and bytes.
+- Do not buffer or reinterpret tool-call events.
+- Let the native Responses backend own its streaming semantics.
+
+### Stateful Streaming
+
+For Praxis-owned agentic mode:
+
+- Buffer upstream model SSE while determining whether the model is returning final text or requesting tool execution.
+- Accumulate streamed function-call argument deltas until the tool call is complete.
+- Do not expose intermediate tool-call responses as though they were the final answer when Praxis intends to execute those tools.
+- Execute approved tools only after complete validated tool-call input is available.
+- Continue the loop internally after tool results are injected.
+- Return valid final Responses output to the client.
+
+The default stateful streaming behavior should be a buffered final response mode. Any progress-event forwarding should be explicit, separately designed and tested.
+
+Stateful streaming must enforce:
+
+- Maximum buffered bytes.
+- Maximum buffered events.
+- Timeouts.
+- Terminal-event requirements.
+- Complete function-call argument requirements.
+- Fail-closed behavior for malformed, truncated or incomplete streams.
+
+## External Services And OGX
+
+Praxis should own the Responses agent loop when operating in agentic mode.
+
+OGX or similar systems may still be used as external service backends for non-loop capabilities such as:
+
+- Conversation or response storage.
+- Files.
+- Vector stores.
+- Search.
+- Skills.
+- Containers or future execution environments.
+
+Praxis should not delegate `/v1/responses` to OGX and then claim that Praxis implements the orchestration loop. The intended integration is:
+
+```text
+Praxis owns the loop
+  -> OGX-backed state/file/search/vector services may support the loop
+```
+
+
+## Supported Initial Capability Target
+
+The implementation target for the epic includes:
+
+- Native byte-preserving Responses pass-through.
+- Body-aware Responses classification and routing.
+- Praxis-owned stateful orchestration.
+- Responses JSON and SSE parsing.
+- HTTP-first internal subrequests.
+- Conversation and response state handling.
+- At least one configured local HTTP tool.
+- At least one MCP tool adapter.
+- Local-versus-remote-versus-client tool policy.
+- Guardrails around inference and tool results.
+- Buffered stateful streaming semantics.
+- External file/search/vector service callouts without delegating loop ownership.
+
+## Explicit Non-Goals For The Core Implementation
+
+The epic does not need to first implement:
+
+- A generic asynchronous response-phase continuation engine for every Praxis filter.
+- Cross-lifecycle branch-chain re-entry for arbitrary proxy flows.
+- A complete production distributed state platform before the local typed abstraction works.
+- gRPC or `ext_proc` parity before HTTP tool and model subrequests are proven.
+- OGX ownership of the `/v1/responses` loop.
+- Every future Responses tool type, such as code interpreter or computer use, before the core loop is complete.
+
+## Failure And Limit Handling
+
+The agentic response orchestrator must enforce explicit boundaries:
+
+- Maximum inference iterations.
+- Maximum total tool calls.
+- Per-tool timeout.
+- Total request timeout.
+- Maximum injected tool-result size.
+- Maximum model response bytes.
+- Streaming buffer byte and event limits.
+- Controlled handling of unknown tools.
+- Controlled handling of malformed or incomplete SSE.
+- Controlled handling of missing stored conversation state.
+
+Failures must be returned as Responses-shaped errors or incomplete responses according to defined API behavior, rather than silently falling through or partially executing unauthorized work.
+
+## Completion Criteria
+
+The architecture is complete when Praxis can:
+
+1. Forward native Responses requests and streams without mutation.
+2. Route configured stateful requests into a Praxis-owned agentic response orchestrator.
+3. Load and persist response/conversation state with correct `store` behavior.
+4. Execute an approved local tool, inject its result and call the model again.
+5. Distinguish locally executable tools from backend-owned and client-owned tools.
+6. Fail closed for unknown or unauthorized tool calls.
+7. Apply guardrails before inference and after tool output.
+8. Buffer and safely process stateful streamed tool calls.
+9. Enforce iteration, timeout, tool-count and buffer limits.
+10. Use scoped state and safe subrequest plumbing suitable for upstream integration.
+11. Integrate external files, search, vector-store or OGX-backed services without transferring ownership of the agent loop away from Praxis.
+
 ## Stacked Upstream PR Plan
 
 The e2e spike should be completed first. Then replay the proven work into
