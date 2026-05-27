@@ -1,0 +1,284 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Responses API E2E Demo — Transcript Generator
+#
+# Generates a Markdown transcript of the complete demo.
+#
+# Usage:
+#   bash run-complete-e2e-demo.sh [output-file]
+#
+# Environment variables (optional):
+#   PRAXIS_DIR       Path to the e2e Praxis checkout (default: ~/praxxis/epic-354/e2e/praxis)
+#   PRAXIS_PORT      Praxis listener port (default: 18080)
+#   LOOP_MODEL_PORT  Non-streaming model mock port (default: 13101)
+#   STREAM_MODEL_PORT Streaming model mock port (default: 13102)
+#   STATE_MODEL_PORT State model mock port (default: 13103)
+#   TOOL_PORT        Tool mock port (default: 14101)
+# ---------------------------------------------------------------------------
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PRAXIS_DIR="${PRAXIS_DIR:-$HOME/praxxis/epic-354/e2e/praxis}"
+OUT="${1:-$SCRIPT_DIR/sample-output.md}"
+
+PRAXIS_PORT="${PRAXIS_PORT:-18080}"
+LOOP_MODEL_PORT="${LOOP_MODEL_PORT:-13101}"
+STREAM_MODEL_PORT="${STREAM_MODEL_PORT:-13102}"
+STATE_MODEL_PORT="${STATE_MODEL_PORT:-13103}"
+TOOL_PORT="${TOOL_PORT:-14101}"
+
+WORK="$(mktemp -d)"
+PGIDS=()
+
+cleanup() {
+  for pgid in "${PGIDS[@]:-}"; do
+    kill -TERM -- "-$pgid" >/dev/null 2>&1 || true
+  done
+  sleep 0.5
+  for pgid in "${PGIDS[@]:-}"; do
+    kill -KILL -- "-$pgid" >/dev/null 2>&1 || true
+  done
+  rm -rf "$WORK"
+}
+
+trap cleanup EXIT
+
+wait_for_port() {
+  local port="$1"
+  local name="$2"
+  for _ in $(seq 1 120); do
+    if (echo >"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "Timed out waiting for $name on 127.0.0.1:$port" >&2
+  return 1
+}
+
+start_bg() {
+  local name="$1"
+  shift
+  setsid "$@" >"$WORK/$name.log" 2>&1 &
+  local pid=$!
+  PGIDS+=("$pid")
+}
+
+write_config() {
+  local config="$1"
+  cat >"$config" <<YAML
+listeners:
+  - name: gateway
+    address: "127.0.0.1:${PRAXIS_PORT}"
+    filter_chains: [orchestrator]
+
+filter_chains:
+  - name: orchestrator
+    filters:
+      - filter: responses_orchestrator
+        timeout_ms: 5000
+        max_iterations: 5
+        models:
+          loop-model:
+            endpoint: "127.0.0.1:${LOOP_MODEL_PORT}"
+          stream-model:
+            endpoint: "127.0.0.1:${STREAM_MODEL_PORT}"
+          state-model:
+            endpoint: "127.0.0.1:${STATE_MODEL_PORT}"
+        tools:
+          get_weather:
+            endpoint: "127.0.0.1:${TOOL_PORT}"
+        conditions:
+          - when:
+              path: "/v1/responses"
+              methods: [POST]
+YAML
+}
+
+json_body() {
+  python3 -m json.tool 2>/dev/null || cat
+}
+
+run_curl() {
+  local title="$1"
+  local description="$2"
+  local body="$3"
+
+  {
+    echo
+    echo "## $title"
+    echo
+    echo "$description"
+    echo
+    echo '```bash'
+    echo "curl -sS -X POST http://127.0.0.1:${PRAXIS_PORT}/v1/responses \\"
+    echo '  -H "Content-Type: application/json" \'
+    echo "  -d '$body'"
+    echo '```'
+    echo
+    echo "Response:"
+    echo
+  } >>"$OUT"
+
+  local raw status response_body
+  raw="$(
+    curl -sS -X POST "http://127.0.0.1:${PRAXIS_PORT}/v1/responses" \
+      -H "Content-Type: application/json" \
+      -d "$body" \
+      -w $'\nHTTP_STATUS:%{http_code}\n'
+  )"
+  status="$(printf '%s\n' "$raw" | awk -F: '/^HTTP_STATUS:/ {print $2}' | tail -1)"
+  response_body="$(printf '%s\n' "$raw" | sed '/^HTTP_STATUS:/d')"
+
+  {
+    echo '```json'
+    printf '%s\n' "$response_body" | json_body
+    echo '```'
+    echo
+    echo '```text'
+    echo "HTTP_STATUS: $status"
+    echo '```'
+  } >>"$OUT"
+}
+
+append_log() {
+  local title="$1"
+  local path="$2"
+  {
+    echo
+    echo "## $title"
+    echo
+    echo '```text'
+    sed -n '1,220p' "$path"
+    echo '```'
+  } >>"$OUT"
+}
+
+# -- Build --
+echo "Building Praxis..."
+(cd "$PRAXIS_DIR" && cargo build -p praxis --features ai-inference 2>&1 | tail -2)
+
+mkdir -p "$(dirname "$OUT")"
+CONFIG="$WORK/e2e-demo.yaml"
+write_config "$CONFIG"
+
+# -- Start services --
+echo "Starting mocks..."
+start_bg "loop-model" python3 "$SCRIPT_DIR/mock-scripts/responses-loop-mock.py" "$LOOP_MODEL_PORT"
+start_bg "stream-model" python3 "$SCRIPT_DIR/mock-scripts/responses-streaming-loop-mock.py" "$STREAM_MODEL_PORT"
+start_bg "state-model" python3 "$SCRIPT_DIR/mock-scripts/responses-state-mock.py" "$STATE_MODEL_PORT"
+start_bg "tool-get-weather" python3 "$SCRIPT_DIR/mock-scripts/tool-http-mock.py" "$TOOL_PORT" get_weather
+
+wait_for_port "$LOOP_MODEL_PORT" "loop model mock"
+wait_for_port "$STREAM_MODEL_PORT" "streaming model mock"
+wait_for_port "$STATE_MODEL_PORT" "state model mock"
+wait_for_port "$TOOL_PORT" "tool mock"
+
+echo "Starting Praxis..."
+start_bg "praxis" bash -c "cd '$PRAXIS_DIR' && RUST_LOG=praxis=info exec ./target/debug/praxis -c '$CONFIG'"
+wait_for_port "$PRAXIS_PORT" "Praxis"
+
+echo "Running demo curls..."
+
+# -- Transcript --
+cat >"$OUT" <<EOF
+# Epic 354 Complete E2E Demo Transcript
+
+Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+This transcript was generated by:
+
+\`\`\`bash
+bash run-complete-e2e-demo.sh sample-output.md
+\`\`\`
+
+It demonstrates the Praxis-owned Responses API agentic loop
+(\`responses_orchestrator\` terminal filter) through a running
+Praxis build with mock model and tool backends.
+
+## Demo Config
+
+\`\`\`yaml
+$(cat "$CONFIG")
+\`\`\`
+EOF
+
+run_curl \
+  "1. Non-Streaming Agentic Loop" \
+  "The client sends a Responses request with \`get_weather\` advertised. The model mock returns a \`function_call\`, the orchestrator executes the tool, injects \`function_call_output\` by \`call_id\`, calls the model again, and returns the final answer." \
+  '{"model":"loop-model","input":"What is the weather in Boston and should I bring sunglasses?","tools":[{"type":"function","name":"get_weather"}]}'
+
+run_curl \
+  "2. Tool Not Advertised Fails Closed" \
+  "Same model returns \`get_weather\`, but the client did not advertise any local tools. The orchestrator rejects the tool call with 400 and never contacts the tool backend." \
+  '{"model":"loop-model","input":"What is the weather in Boston?"}'
+
+run_curl \
+  "3. Buffered Streaming Agentic Loop" \
+  "The streaming mock returns SSE with \`function_call_arguments.delta\` events split across multiple chunks. The orchestrator buffers until arguments are complete, executes the tool once, reinfers, and returns a synthesized JSON final response." \
+  '{"model":"stream-model","input":"What is the weather in Boston?","stream":true,"tools":[{"type":"function","name":"get_weather"}]}'
+
+run_curl \
+  "4. Store True Persists Response State" \
+  "The state mock returns \`id=resp_mock_test_001\`. With \`store:true\`, the orchestrator persists the full conversation transcript (user input + model output) for later continuation." \
+  '{"model":"state-model","input":"Remember this demo context.","store":true}'
+
+run_curl \
+  "5. previous_response_id Replays Prior Context" \
+  "The second request references the stored response. The orchestrator loads the prior transcript and prepends it before the new input. The state mock log below shows the enriched model request." \
+  '{"model":"state-model","input":"Use the previous context now.","previous_response_id":"resp_mock_test_001"}'
+
+run_curl \
+  "6. Missing previous_response_id Fails Closed" \
+  "The orchestrator returns 404 without calling the model backend. No side effects." \
+  '{"model":"state-model","input":"This should fail.","previous_response_id":"resp_missing"}'
+
+# -- Logs --
+append_log "Loop Model Mock Log" "$WORK/loop-model.log"
+append_log "Streaming Model Mock Log" "$WORK/stream-model.log"
+append_log "State Model Mock Log" "$WORK/state-model.log"
+append_log "Tool Mock Log" "$WORK/tool-get-weather.log"
+
+{
+  echo
+  echo "## Praxis Log (orchestrator entries)"
+  echo
+  echo '```text'
+  grep "responses_orchestrator" "$WORK/praxis.log" 2>/dev/null | head -40
+  echo '```'
+} >>"$OUT"
+
+# -- What this proves --
+{
+  echo
+  echo "## What This Proves"
+  echo
+  echo "1. **Terminal request-phase orchestrator**: Praxis owns the model/tool loop without using the normal upstream proxy path or \`on_response_body\` hooks."
+  echo "2. **Non-streaming loop**: model → function_call → tool execution → function_call_output → model → final response."
+  echo "3. **Request-scoped tool authorization**: tools must be both advertised in the request AND configured in Praxis config. Unadvertised tools are rejected."
+  echo "4. **Buffered SSE streaming**: function_call arguments split across SSE delta events are assembled before tool execution."
+  echo "5. **State persistence**: \`store:true\` persists the full conversation transcript; \`previous_response_id\` replays it before new input."
+  echo "6. **Fail-closed behavior**: missing previous response returns 404 without backend calls; unadvertised tools return 400 without tool calls."
+} >>"$OUT"
+
+# -- Test results --
+{
+  echo
+  echo "## Automated Test Results"
+  echo
+  echo '```text'
+  echo '$ cargo test -p praxis-tests-integration --test suite -- responses'
+  (cd "$PRAXIS_DIR" && cargo test -p praxis-tests-integration --test suite -- responses 2>&1 | grep "test result")
+  echo
+  echo '$ cargo test -p praxis-tests-schema --test suite -- all_example_configs_parse'
+  (cd "$PRAXIS_DIR" && cargo test -p praxis-tests-schema --test suite -- all_example_configs_parse 2>&1 | grep "test result")
+  echo
+  echo '$ cargo +nightly fmt --all --check'
+  (cd "$PRAXIS_DIR" && cargo +nightly fmt --all --check 2>&1 && echo "(clean)")
+  echo '```'
+} >>"$OUT"
+
+echo
+echo "Wrote demo transcript: $OUT"
+echo "Cleaning up..."
