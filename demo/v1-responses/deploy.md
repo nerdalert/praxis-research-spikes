@@ -226,6 +226,89 @@ bash praxis-research-spikes/demo/v1-responses/run-complete-e2e-demo.sh \
 
 ---
 
+## AI-Assisted Setup
+
+Copy the prompt below into an AI coding assistant (e.g. Claude Code) to have it
+clone, build, and run the full demo automatically.
+
+````text
+Set up and run the Praxis Responses API agentic loop demo. Follow these steps:
+
+1. Clone the Praxis repo and check out the e2e branch:
+
+   git clone https://github.com/nerdalert/praxis.git ~/praxis
+   cd ~/praxis
+   git checkout origin/brent-responses-api-e2e-not-for-merge
+
+2. Clone the research spikes repo (contains the mock scripts):
+
+   git clone https://github.com/nerdalert/praxis-research-spikes.git ~/praxis-research-spikes
+
+3. Build Praxis with the ai-inference feature:
+
+   cd ~/praxis
+   cargo build -p praxis --features ai-inference
+
+4. Start the four mock backends in the background:
+
+   python3 ~/praxis-research-spikes/demo/v1-responses/mock-scripts/responses-loop-mock.py 13101 &
+   python3 ~/praxis-research-spikes/demo/v1-responses/mock-scripts/responses-streaming-loop-mock.py 13102 &
+   python3 ~/praxis-research-spikes/demo/v1-responses/mock-scripts/responses-state-mock.py 13103 &
+   python3 ~/praxis-research-spikes/demo/v1-responses/mock-scripts/tool-http-mock.py 14101 get_weather &
+
+5. Write the demo config to /tmp/e2e-demo.yaml:
+
+   listeners:
+     - name: gateway
+       address: "127.0.0.1:18080"
+       filter_chains: [orchestrator]
+   filter_chains:
+     - name: orchestrator
+       filters:
+         - filter: responses_orchestrator
+           timeout_ms: 5000
+           max_iterations: 5
+           models:
+             loop-model:
+               endpoint: "127.0.0.1:13101"
+             stream-model:
+               endpoint: "127.0.0.1:13102"
+             state-model:
+               endpoint: "127.0.0.1:13103"
+           tools:
+             get_weather:
+               endpoint: "127.0.0.1:14101"
+           conditions:
+             - when:
+                 path: "/v1/responses"
+                 methods: [POST]
+
+6. Start Praxis with the config:
+
+   cd ~/praxis
+   RUST_LOG=praxis=info cargo run -p praxis --features ai-inference -- -c /tmp/e2e-demo.yaml
+
+   Wait for "HTTP listener registered" in the output before proceeding.
+
+7. Run all six demo curls against http://127.0.0.1:18080/v1/responses and show
+   the results. The six scenarios are:
+
+   a) Non-streaming agentic loop (model=loop-model, tools=[get_weather])
+   b) Tool not advertised — fails closed (model=loop-model, no tools)
+   c) Buffered streaming loop (model=stream-model, stream=true, tools=[get_weather])
+   d) Store state (model=state-model, store=true)
+   e) Continue with previous_response_id=resp_mock_test_001
+   f) Missing previous_response_id=resp_missing — fails closed
+
+   See deploy.md in praxis-research-spikes/demo/v1-responses/ for the exact
+   curl commands and expected outputs.
+
+8. After running all curls, show a summary of which scenarios passed or failed,
+   then clean up by killing the background mock processes.
+````
+
+---
+
 ## Cleanup
 
 Kill background processes:
