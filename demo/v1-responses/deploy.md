@@ -4,13 +4,21 @@
 
 - **Rust stable 1.94+** (for building Praxis)
 - **Python 3** (for mock backends)
-- **Linux shell** (tested on Ubuntu)
-- **E2E Praxis checkout** at `~/praxxis/epic-354/e2e/praxis`
+- **Linux shell**
+- **Git** (for cloning the repo)
+
+Clone the Praxis repo and check out the e2e branch:
+
+```bash
+git clone https://github.com/nerdalert/praxis.git ~/praxis
+cd ~/praxis
+git checkout origin/brent-responses-api-e2e-not-for-merge
+```
 
 Build Praxis before starting the demo:
 
 ```bash
-cd ~/praxxis/epic-354/e2e/praxis
+cd ~/praxis
 cargo build -p praxis --features ai-inference
 ```
 
@@ -21,7 +29,7 @@ cargo build -p praxis --features ai-inference
 Start four mock backends. Each one prints request logs to stdout.
 
 ```bash
-cd ~/praxxis/praxis-research-spikes/demo/v1-responses
+cd praxis-research-spikes/demo/v1-responses
 
 python3 mock-scripts/responses-loop-mock.py 13101 &
 python3 mock-scripts/responses-streaming-loop-mock.py 13102 &
@@ -71,7 +79,7 @@ filter_chains:
               methods: [POST]
 YAML
 
-cd ~/praxxis/epic-354/e2e/praxis
+cd ~/praxis
 RUST_LOG=praxis=info cargo run -p praxis --features ai-inference -- -c /tmp/e2e-demo.yaml
 ```
 
@@ -212,8 +220,8 @@ curl -sS -w "\nHTTP_STATUS:%{http_code}\n" \
 To generate a complete Markdown transcript automatically:
 
 ```bash
-bash ~/praxxis/praxis-research-spikes/demo/v1-responses/run-complete-e2e-demo.sh \
-  ~/praxxis/praxis-research-spikes/demo/v1-responses/sample-output.md
+bash praxis-research-spikes/demo/v1-responses/run-complete-e2e-demo.sh \
+  praxis-research-spikes/demo/v1-responses/sample-output.md
 ```
 
 ---

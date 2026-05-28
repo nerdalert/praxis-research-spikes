@@ -10,7 +10,7 @@ set -euo pipefail
 #   bash run-complete-e2e-demo.sh [output-file]
 #
 # Environment variables (optional):
-#   PRAXIS_DIR       Path to the e2e Praxis checkout (default: ~/praxxis/epic-354/e2e/praxis)
+#   PRAXIS_DIR       Path to the Praxis checkout (default: ~/praxis)
 #   PRAXIS_PORT      Praxis listener port (default: 18080)
 #   LOOP_MODEL_PORT  Non-streaming model mock port (default: 13101)
 #   STREAM_MODEL_PORT Streaming model mock port (default: 13102)
@@ -19,7 +19,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PRAXIS_DIR="${PRAXIS_DIR:-$HOME/praxxis/epic-354/e2e/praxis}"
+PRAXIS_DIR="${PRAXIS_DIR:-$HOME/praxis}"
 OUT="${1:-$SCRIPT_DIR/sample-output.md}"
 
 PRAXIS_PORT="${PRAXIS_PORT:-18080}"
@@ -245,7 +245,7 @@ append_log "Tool Mock Log" "$WORK/tool-get-weather.log"
   echo "## Praxis Log (orchestrator entries)"
   echo
   echo '```text'
-  grep "responses_orchestrator" "$WORK/praxis.log" 2>/dev/null | head -40
+  grep "responses_orchestrator" "$WORK/praxis.log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | head -40
   echo '```'
 } >>"$OUT"
 

@@ -11,6 +11,10 @@ until the model produces a final answer.
 The client sends one request. Praxis handles the entire model/tool loop
 internally and returns the complete response.
 
+The actual production architecture is still being firmed up. This demo
+exists to prove what can be achieved with Praxis and to surface any
+major blockers early — before committing to a final design.
+
 ## Why /v1/responses Matters
 
 The OpenAI Responses API is the successor to Chat Completions. It was
@@ -60,11 +64,12 @@ single final response. The normal upstream proxy path is never entered.
 
 ## Why a Terminal Orchestrator
 
-Praxis branch re-entry is request-phase only. It cannot inspect a normal
-upstream model response and then re-enter inference. Response-body hooks
-are synchronous and cannot perform async tool/model subrequests.
+Praxis branch re-entry is request-phase only. It cannot currently inspect
+a normal upstream model response and then re-enter inference.
+Response-body hooks are synchronous and cannot currently perform async
+tool/model subrequests.
 
-The `responses_orchestrator` solves both constraints: it runs in the
+The example `responses_orchestrator` solves both constraints: it runs in the
 request-body phase, performs inference and tool calls as async HTTP
 subrequests, and returns a local response via `FilterAction::Reject`
 with status 200. This follows the existing `static_response` convention.
@@ -90,10 +95,11 @@ Client
 
 ## Implementation Source
 
-The implementation lives in the e2e validation checkout:
+The implementation lives on the `brent-responses-api-e2e-not-for-merge`
+branch of the Praxis repo:
 
 ```
-~/praxxis/epic-354/e2e/praxis
+https://github.com/nerdalert/praxis.git  (branch: brent-responses-api-e2e-not-for-merge)
 ```
 
 This is not merged upstream. It is the validation branch used to prove
