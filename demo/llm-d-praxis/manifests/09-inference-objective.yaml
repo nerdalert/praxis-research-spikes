@@ -1,0 +1,181 @@
+# Example 9: InferenceObjective Metadata
+#
+# Praxis reads InferenceObjective CRDs and resolves the
+# x-llm-d-inference-objective header to priority metadata at request
+# time. Priority is internal to the routing decision -- it is not
+# echoed back in the response.
+#
+# Prerequisite: install crds/inferenceobjective-crd.yaml first.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sim-a-config
+data:
+  config.yaml: |
+    port: 8000
+    model: "fake-model"
+    served-model-name: ["fake-model"]
+    mode: "echo"
+    fake-metrics:
+      running-requests: 0
+      waiting-requests: 0
+      kv-cache-usage: 0.0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sim-a
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sim-a
+  template:
+    metadata:
+      labels:
+        app: sim-a
+    spec:
+      containers:
+      - name: sim
+        image: ghcr.io/llm-d/llm-d-inference-sim:dev
+        imagePullPolicy: Never
+        args: ["--config", "/config/config.yaml", "--v=5"]
+        ports:
+        - containerPort: 8000
+        volumeMounts:
+        - name: config
+          mountPath: /config
+      volumes:
+      - name: config
+        configMap:
+          name: sim-a-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sim-a
+spec:
+  selector:
+    app: sim-a
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: llm-d.ai/v1alpha2
+kind: InferenceObjective
+metadata:
+  name: high-priority
+spec:
+  poolRef:
+    name: sim-pool
+    group: "inference.networking.k8s.io"
+    kind: "InferencePool"
+  priority: 10
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: praxis-sa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: praxis-discovery
+rules:
+- apiGroups: ["llm-d.ai"]
+  resources: ["inferenceobjectives"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: praxis-discovery
+subjects:
+- kind: ServiceAccount
+  name: praxis-sa
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: praxis-discovery
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: praxis-config
+data:
+  config.yaml: |
+    listeners:
+      - name: default
+        address: "0.0.0.0:8080"
+        filter_chains: [main]
+    filter_chains:
+      - name: main
+        filters:
+          - filter: llmd_endpoint_picker
+            metrics_refresh_ms: 1000
+            metrics_timeout_ms: 500
+            endpoints:
+              - name: sim-a
+                address: "sim-a:8000"
+                models: ["fake-model"]
+                metrics_url: "http://sim-a:8000/metrics"
+                running_requests: 0
+                waiting_requests: 0
+                kv_cache_usage_percent: 0.0
+            inference_objective:
+              enabled: true
+              namespace: default
+              api_version: "llm-d.ai/v1alpha2"
+              pool_ref:
+                name: sim-pool
+                group: "inference.networking.k8s.io"
+                kind: "InferencePool"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: praxis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: praxis
+  template:
+    metadata:
+      labels:
+        app: praxis
+    spec:
+      serviceAccountName: praxis-sa
+      containers:
+      - name: praxis
+        image: praxis-epp:dev
+        imagePullPolicy: Never
+        command: ["praxis"]
+        args: ["-c", "/config/config.yaml"]
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: config
+          mountPath: /config
+      volumes:
+      - name: config
+        configMap:
+          name: praxis-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: praxis
+spec:
+  type: NodePort
+  selector:
+    app: praxis
+  ports:
+  - port: 8080
+    targetPort: 8080
+    nodePort: 30081

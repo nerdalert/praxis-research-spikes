@@ -1,0 +1,76 @@
+# Example 6b: Saturation/Admission Gate -- All Saturated (429 Reject)
+#
+# Both endpoints are saturated. Praxis should return HTTP 429 for
+# pool-level saturation rejection.
+#
+# This manifest patches the Praxis config to point to two saturated
+# endpoints. Apply AFTER 06-saturation.yaml pods are running.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sim-a-config
+data:
+  config.yaml: |
+    port: 8000
+    model: "fake-model"
+    served-model-name: ["fake-model"]
+    mode: "echo"
+    fake-metrics:
+      running-requests: 20
+      waiting-requests: 15
+      kv-cache-usage: 0.95
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sim-b-config
+data:
+  config.yaml: |
+    port: 8000
+    model: "fake-model"
+    served-model-name: ["fake-model"]
+    mode: "echo"
+    fake-metrics:
+      running-requests: 25
+      waiting-requests: 20
+      kv-cache-usage: 0.98
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: praxis-config
+data:
+  config.yaml: |
+    listeners:
+      - name: default
+        address: "0.0.0.0:8080"
+        filter_chains: [main]
+    filter_chains:
+      - name: main
+        filters:
+          - filter: llmd_endpoint_picker
+            metrics_refresh_ms: 1000
+            metrics_timeout_ms: 500
+            endpoints:
+              - name: sim-a
+                address: "sim-a:8000"
+                models: ["fake-model"]
+                metrics_url: "http://sim-a:8000/metrics"
+                running_requests: 20
+                waiting_requests: 15
+                kv_cache_usage_percent: 95.0
+              - name: sim-b
+                address: "sim-b:8000"
+                models: ["fake-model"]
+                metrics_url: "http://sim-b:8000/metrics"
+                running_requests: 25
+                waiting_requests: 20
+                kv_cache_usage_percent: 98.0
+            saturation_gate:
+              enabled: true
+              queue_depth_threshold: 10
+              kv_cache_util_threshold: 0.9
+              pool_saturation_threshold: 1.0
+              headroom: 0.2
+              reject_status: 429

@@ -1,0 +1,202 @@
+# Example 5: Prefix-Cache-Aware Routing
+#
+# Two echo backends with different response signatures. Praxis is
+# configured with prefix_cache enabled and high prefix weight.
+#
+# This KIND demo is intentionally non-invasive: it does not mutate
+# running nginx pods or fake a dynamic load shift. It shows the prefix
+# cache request path and explains the approximate in-memory index.
+#
+# The stronger proof that prefix score overrides a changed load score
+# lives in the Praxis integration test, where metrics are managed by
+# local test servers:
+# llmd_endpoint_picker_prefix_cache_changes_routing.
+#
+# Uses mock echo backends because the prefix index is an in-memory
+# approximation — it does not read real KV-cache state.
+#
+# The echo backends use nginx to return a static JSON response
+# that identifies which backend handled the request.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: echo-a-config
+data:
+  default.conf: |
+    server {
+      listen 8000;
+      location / {
+        default_type application/json;
+        return 200 '{"id":"chatcmpl-echo-a","model":"fake-model","object":"chat.completion","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"echo-a"}}]}';
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: echo-b-config
+data:
+  default.conf: |
+    server {
+      listen 8000;
+      location / {
+        default_type application/json;
+        return 200 '{"id":"chatcmpl-echo-b","model":"fake-model","object":"chat.completion","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"echo-b"}}]}';
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-a
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: echo-a
+  template:
+    metadata:
+      labels:
+        app: echo-a
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.27-alpine
+        ports:
+        - containerPort: 8000
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nginx/conf.d
+      volumes:
+      - name: config
+        configMap:
+          name: echo-a-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: echo-b
+  template:
+    metadata:
+      labels:
+        app: echo-b
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.27-alpine
+        ports:
+        - containerPort: 8000
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nginx/conf.d
+      volumes:
+      - name: config
+        configMap:
+          name: echo-b-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-a
+spec:
+  selector:
+    app: echo-a
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-b
+spec:
+  selector:
+    app: echo-b
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: praxis-config
+data:
+  config.yaml: |
+    listeners:
+      - name: default
+        address: "0.0.0.0:8080"
+        filter_chains: [main]
+    filter_chains:
+      - name: main
+        filters:
+          - filter: llmd_endpoint_picker
+            queue_weight: 0.1
+            kv_cache_weight: 0.1
+            endpoints:
+              - name: echo-a
+                address: "echo-a:8000"
+                models: ["fake-model"]
+                running_requests: 0
+                waiting_requests: 0
+                kv_cache_usage_percent: 0.0
+              - name: echo-b
+                address: "echo-b:8000"
+                models: ["fake-model"]
+                running_requests: 0
+                waiting_requests: 0
+                kv_cache_usage_percent: 0.0
+            prefix_cache:
+              enabled: true
+              weight: 10.0
+              block_size_tokens: 4
+              max_prefix_blocks_to_match: 64
+              lru_capacity_per_endpoint: 1000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: praxis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: praxis
+  template:
+    metadata:
+      labels:
+        app: praxis
+    spec:
+      containers:
+      - name: praxis
+        image: praxis-epp:dev
+        imagePullPolicy: Never
+        command: ["praxis"]
+        args: ["-c", "/config/config.yaml"]
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: config
+          mountPath: /config
+      volumes:
+      - name: config
+        configMap:
+          name: praxis-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: praxis
+spec:
+  type: NodePort
+  selector:
+    app: praxis
+  ports:
+  - port: 8080
+    targetPort: 8080
+    nodePort: 30081

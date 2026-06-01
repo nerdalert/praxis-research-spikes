@@ -1,0 +1,202 @@
+# Example 7: P/D Disaggregation
+#
+# Two llm-d-inference-sim backends with role labels. Praxis selects
+# the decode backend as upstream and injects x-prefiller-host-port
+# pointing to the prefill backend.
+#
+# The decode backend is a real llm-d-inference-sim in echo mode. Its
+# response proves the request was routed to the decode endpoint.
+# Prefill header injection is verified via Praxis debug logs.
+#
+# inject_kv_transfer_params is false -- this demo proves role-based
+# routing without overclaiming body mutation.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: echo-a-config
+data:
+  config.yaml: |
+    port: 8000
+    model: "fake-model"
+    served-model-name: ["fake-model"]
+    mode: "echo"
+    fake-metrics:
+      running-requests: 0
+      waiting-requests: 0
+      kv-cache-usage: 0.0
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: echo-b-config
+data:
+  config.yaml: |
+    port: 8000
+    model: "fake-model"
+    served-model-name: ["fake-model"]
+    mode: "echo"
+    fake-metrics:
+      running-requests: 0
+      waiting-requests: 0
+      kv-cache-usage: 0.0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: decode-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: decode-backend
+  template:
+    metadata:
+      labels:
+        app: decode-backend
+        llm-d.ai/role: decode
+    spec:
+      containers:
+      - name: sim
+        image: ghcr.io/llm-d/llm-d-inference-sim:dev
+        imagePullPolicy: Never
+        args: ["--config", "/config/config.yaml", "--v=5"]
+        ports:
+        - containerPort: 8000
+        volumeMounts:
+        - name: config
+          mountPath: /config
+      volumes:
+      - name: config
+        configMap:
+          name: echo-a-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prefill-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prefill-backend
+  template:
+    metadata:
+      labels:
+        app: prefill-backend
+        llm-d.ai/role: prefill
+    spec:
+      containers:
+      - name: sim
+        image: ghcr.io/llm-d/llm-d-inference-sim:dev
+        imagePullPolicy: Never
+        args: ["--config", "/config/config.yaml", "--v=5"]
+        ports:
+        - containerPort: 8000
+        volumeMounts:
+        - name: config
+          mountPath: /config
+      volumes:
+      - name: config
+        configMap:
+          name: echo-b-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: decode-backend
+spec:
+  selector:
+    app: decode-backend
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prefill-backend
+spec:
+  selector:
+    app: prefill-backend
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: praxis-config
+data:
+  config.yaml: |
+    listeners:
+      - name: default
+        address: "0.0.0.0:8080"
+        filter_chains: [main]
+    filter_chains:
+      - name: main
+        filters:
+          - filter: llmd_endpoint_picker
+            endpoints:
+              - name: decode-backend
+                address: "decode-backend:8000"
+                models: ["fake-model"]
+                role: decode
+                running_requests: 0
+                waiting_requests: 0
+                kv_cache_usage_percent: 0.0
+              - name: prefill-backend
+                address: "prefill-backend:8000"
+                models: ["fake-model"]
+                role: prefill
+                running_requests: 0
+                waiting_requests: 0
+                kv_cache_usage_percent: 0.0
+            disaggregation:
+              enabled: true
+              prefill_header: "x-prefiller-host-port"
+              prefill_mode: always
+              inject_kv_transfer_params: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: praxis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: praxis
+  template:
+    metadata:
+      labels:
+        app: praxis
+    spec:
+      containers:
+      - name: praxis
+        image: praxis-epp:dev
+        imagePullPolicy: Never
+        command: ["praxis"]
+        args: ["-c", "/config/config.yaml"]
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: config
+          mountPath: /config
+      volumes:
+      - name: config
+        configMap:
+          name: praxis-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: praxis
+spec:
+  type: NodePort
+  selector:
+    app: praxis
+  ports:
+  - port: 8080
+    targetPort: 8080
+    nodePort: 30081
