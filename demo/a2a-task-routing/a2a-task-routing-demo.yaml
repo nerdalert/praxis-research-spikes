@@ -1,0 +1,58 @@
+# Praxis config for manual A2A task routing validation.
+#
+# Manual validation only -- not a production config.
+#
+# Usage: cargo run -p praxis -- -c docs/manual/a2a-task-routing-demo.yaml
+
+listeners:
+  - name: a2a-demo
+    address: "127.0.0.1:8090"
+    filter_chains: [a2a-demo]
+
+filter_chains:
+  - name: a2a-demo
+    filters:
+      - filter: a2a
+        max_body_bytes: 65536
+        on_invalid: continue
+        headers:
+          method: x-praxis-a2a-method
+          family: x-praxis-a2a-family
+          task_id: x-praxis-a2a-task-id
+          streaming: x-praxis-a2a-streaming
+        task_routing:
+          enabled: true
+          route_cluster_header: x-praxis-a2a-route-cluster
+          ttl_seconds: 300
+          terminal_ttl_seconds: 60
+
+      - filter: router
+        routes:
+          # Task route hit: stored ownership directs to the right cluster
+          - path_prefix: "/"
+            headers:
+              x-praxis-a2a-route-cluster: "agent-a"
+            cluster: "agent-a"
+          - path_prefix: "/"
+            headers:
+              x-praxis-a2a-route-cluster: "agent-b"
+            cluster: "agent-b"
+
+          # Initial SendMessage goes to agent-a
+          - path_prefix: "/"
+            headers:
+              x-praxis-a2a-method: "SendMessage"
+            cluster: "agent-a"
+
+          # Fallback for everything else
+          - path_prefix: "/"
+            cluster: "agent-b"
+
+      - filter: load_balancer
+        clusters:
+          - name: "agent-a"
+            endpoints:
+              - "127.0.0.1:9101"
+          - name: "agent-b"
+            endpoints:
+              - "127.0.0.1:9102"
