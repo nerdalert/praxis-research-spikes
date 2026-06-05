@@ -12,8 +12,10 @@ set -euo pipefail
 # -- Environment defaults ---------------------------------------------------
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PRAXIS_DIR="${PRAXIS_DIR:-/home/ubuntu/praxxis/llm-d/praxis}"
-LLM_D_INFERENCE_SIM_DIR="${LLM_D_INFERENCE_SIM_DIR:-/home/ubuntu/praxxis/llm-d/llm-d-inference-sim}"
+RESEARCH_SPIKES_DIR="$(cd "${DEMO_DIR}/../.." && pwd)"
+REPO_PARENT_DIR="$(cd "${RESEARCH_SPIKES_DIR}/.." && pwd)"
+PRAXIS_DIR="${PRAXIS_DIR:-${REPO_PARENT_DIR}/praxis}"
+LLM_D_INFERENCE_SIM_DIR="${LLM_D_INFERENCE_SIM_DIR:-${REPO_PARENT_DIR}/llm-d-inference-sim}"
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-praxis-llmd-demo}"
 PRAXIS_NODE_PORT="${PRAXIS_NODE_PORT:-30081}"
 PRAXIS_IMAGE="${PRAXIS_IMAGE:-praxis-epp:dev}"
