@@ -58,6 +58,10 @@ Raw artifact locations:
 | Track B | `praxis-go-epp` | 5,331 | 2.74ms | 4.99ms | 6.42ms | 100% | Track B session |
 | Baseline | `envoy-go-epp` | 3,628 | 4.08ms | 7.55ms | 9.68ms | 100% | Track B session |
 
+![Vegeta Simulator Echo: Throughput](assets/matplotlib/simulator-echo-rps.svg)
+
+![Vegeta Simulator Echo: p99 Latency](assets/matplotlib/simulator-echo-p99.svg)
+
 **Summary:** On the simulator echo workload, Track B is faster than the
 Envoy+Go EPP baseline while still keeping Go EPP in the path. Track A has the
 highest RPS in the table, but it is from a separate Track A run and should be
@@ -87,6 +91,10 @@ and 3.36ms p99, but that row was collected in a separate Track A session.
 | Track A | `praxis-native` | 2,821 / 12.07ms | 436 / 84.02ms | 113 / 234.92ms | Track A session |
 | Track B | `praxis-go-epp` | 2,566 / 12.76ms | 530 / 46.57ms | 148 / 147.32ms | Track B session |
 | Baseline | `envoy-go-epp` | 2,174 / 15.84ms | 498 / 48.66ms | 145 / 146.58ms | Track B session |
+
+![Large-Prompt Throughput](assets/matplotlib/large-prompt-rps.svg)
+
+![Track B Advantage Ratio](assets/matplotlib/large-prompt-track-b-ratio.svg)
 
 **Summary:** Larger request bodies reduce the Track B advantage over the
 Envoy baseline. Track B is clearly ahead at 16 KiB, narrowly ahead at 64 KiB,
@@ -122,6 +130,8 @@ slower or faster at larger body sizes.
 | Track A | `praxis-native` | 575 | 2.74ms | 0.014ms | Track A session |
 | Track B | `praxis-go-epp` | 530 | 3.98ms | 0.015ms | Track B session |
 | Baseline | `envoy-go-epp` | 433 | 5.30ms | 0.026ms | Track B session |
+
+![GuideLLM Simulator Echo](assets/matplotlib/guidellm-rps-ttft.svg)
 
 **Summary:** GuideLLM shows the same ordering as Vegeta for the same-session
 Track B comparison: Praxis+Go EPP is ahead of Envoy+Go EPP. The gap is smaller

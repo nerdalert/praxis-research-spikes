@@ -7,8 +7,9 @@
 This is the single benchmark location for all llm-d proxy profiles:
 Track A, Track B, the Envoy baseline, and the generic Praxis control.
 
-- **[Benchmark Results](results.md)** — Full result tables with methodology and claim boundaries.
+- **[Benchmark Results](results.md)** — Full result tables, graphs, and claim boundaries.
 - **[Demo Outline](demo-outline.md)** — Slide-by-slide presentation script.
+- **[Graphics Guide](GRAPHICS.md)** — How benchmark SVG graphs are generated (matplotlib, pygal, svgwrite).
 
 ---
 
