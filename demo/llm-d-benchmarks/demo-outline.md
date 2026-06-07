@@ -5,8 +5,11 @@
 - The purpose of this benchmark is to measure request-path overhead.
 - The comparison is between current llm-d scheduling through Envoy plus Go EPP
   and native scheduling inside Praxis.
-- The first benchmark uses a minimal mock backend, so it can run without GPUs
-  or `llm-d-inference-sim`. Future iterations will add the simulator.
+- The benchmark set uses mock backends and `llm-d-inference-sim` echo mode, so
+  it can run without GPUs.
+- The local benchmarks do not run the full llm-d API Gateway, Gateway API
+  controller, CRDs, or `llm-d-deployer`; they run only the measured data-plane
+  pieces.
 - Results should be described as proxy and scheduler control-path overhead,
   not model execution performance.
 
@@ -32,13 +35,39 @@ Client
   -> mock backend (127.0.0.1:18080)
 ```
 
+Praxis + Go EPP path (Track B):
+
+```text
+Client
+  -> Praxis / Pingora
+  -> llmd_external_epp HttpFilter
+  -> ext_proc gRPC call
+  -> Go EPP scheduler
+  -> x-gateway-destination-endpoint
+  -> mock backend (127.0.0.1:18080)
+```
+
 Narration:
 
 - In the baseline, endpoint selection crosses process and protocol boundaries.
 - In Praxis native mode, request parsing, candidate selection, scoring, and
   upstream assignment run inside the proxy.
-- The mock backend returns a static response immediately, isolating proxy and
-  scheduler overhead from backend latency.
+- In Praxis + Go EPP mode (Track B), Praxis replaces Envoy at the edge but
+  keeps the same Go EPP for scheduling. This isolates the proxy cost.
+- The mock backend returns a static response immediately. Simulator runs use
+  `llm-d-inference-sim` echo mode for OpenAI-compatible responses. Both isolate
+  proxy and scheduler overhead from real model execution latency.
+- The Go EPP profiles run the real `llm-d-router` EPP binary with file
+  discovery. They validate the ext_proc/EPP handoff, not the full llm-d
+  Kubernetes control plane.
+- The reason this should carry over is that the request-path contract is the
+  same: OpenAI request in, EPP callout, selected endpoint returned, original
+  request forwarded. A full llm-d deployment adds the Gateway/API/controller
+  machinery that creates and maintains that path.
+- The risk is not the basic handoff; it is whether a full deployment enables
+  extra Kubernetes-only EPP plugins, Envoy-specific metadata, service mesh
+  filters, dynamic discovery, or real model-serving bottlenecks that the local
+  benchmark intentionally leaves out.
 
 ## Benchmark Profiles Slide
 

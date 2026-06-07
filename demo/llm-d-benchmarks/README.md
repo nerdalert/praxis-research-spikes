@@ -20,10 +20,81 @@ The benchmark story is focused on request-path cost:
 - the native Praxis `llmd_endpoint_picker` path;
 - optional compatibility paths where Envoy remains at the edge.
 
-The first benchmark target is the no-GPU control path. It uses a minimal mock
-backend so the proxy and scheduler overhead can be measured without expensive
-model serving infrastructure. Future iterations will add `llm-d-inference-sim`
-for more realistic backend behavior.
+The benchmark set has two no-GPU targets. Mock-backend runs isolate proxy and
+scheduler overhead with minimal Python or Go backends. Simulator runs use
+`llm-d-inference-sim` in echo mode for OpenAI-compatible responses without real
+GPU inference.
+
+## What Actually Runs
+
+These are local-process benchmark runs unless a section explicitly says KIND.
+They do not run a full llm-d Kubernetes deployment.
+
+Each local run starts only the components needed for the profile under test:
+
+- A load generator: Vegeta for raw request-path throughput, or GuideLLM for
+  OpenAI/LLM-shaped client behavior.
+- One proxy path: Praxis, Envoy, or both depending on the profile.
+- The Go EPP process only for `envoy-go-epp` and `praxis-go-epp`.
+- One backend: a minimal mock backend, a Go mock backend, or
+  `llm-d-inference-sim` in echo mode.
+
+What is not running in these local benchmarks:
+
+- The full llm-d API Gateway or Gateway API controller stack.
+- llm-d Kubernetes CRDs, `llm-d-deployer`, InferencePool reconciliation, or
+  Kubernetes service discovery unless a KIND-specific scenario says so.
+- Real vLLM/SGLang workers, GPU model serving, KV-cache transfer, or P/D data
+  movement.
+
+For the Go EPP profiles, the benchmark runs the real Go EPP binary from
+`llm-d-router`, but with file discovery pointing at benchmark backends. That
+proves the Envoy/Praxis to Go EPP request path and endpoint-selection handoff;
+it does not prove the full llm-d control-plane deployment.
+
+## Why This Should Carry Over To Full llm-d
+
+The local benchmarks exercise the same request-path contract that a full llm-d
+deployment depends on:
+
+- The proxy receives an OpenAI-compatible `/v1/chat/completions` request.
+- The proxy sends request headers and body to the Go EPP over the ext_proc
+  protocol, or an ext_proc-compatible Praxis client in Track B.
+- The Go EPP returns a selected endpoint through the same response metadata.
+- The proxy forwards the original request to the selected model backend.
+
+In a full llm-d deployment, the API Gateway, Gateway API resources,
+`ModelService` controller, `InferencePool` resources, Services, and CRDs create
+and maintain that topology. They decide what proxy and EPP Services exist, how
+routes attach, how model backends are discovered, and how deployment lifecycle
+is reconciled. They are important, but they are not expected to change the
+per-request ext_proc contract once traffic reaches Envoy or Praxis.
+
+The main difference is discovery and environment. These benchmarks use static
+file discovery for the Go EPP and local mock or simulator backends. A full llm-d
+deployment usually uses Kubernetes resources, Services, pod discovery, metrics
+scraping, and real vLLM/SGLang workers. That can change absolute throughput and
+enable richer scheduling behavior, so full deployment smoke and GPU-backed
+tests are still required. The local benchmark gives confidence in the proxy/EPP
+hot path, not in every Kubernetes controller or production model-serving path.
+
+What would make the local result fail to carry over:
+
+- Full llm-d enables EPP plugins that require Kubernetes-only state not present
+  in file discovery, such as `InferenceModelRewrite`, `InferenceObjective`,
+  richer endpoint subsets, or metrics-driven policy inputs.
+- The deployed Gateway/Envoy path relies on Envoy-specific metadata or filter
+  behavior that Track B's Praxis ext_proc client does not yet reproduce.
+- The production route uses TLS, mTLS, authn/authz, service mesh filters,
+  retries, or timeout behavior that is not in the local benchmark.
+- Kubernetes networking, Service routing, pod placement, or sidecars dominate
+  the latency profile.
+- Real vLLM/SGLang behavior, GPU saturation, KV-cache pressure, P/D routing, or
+  autoscaling becomes the bottleneck instead of proxy/EPP overhead.
+
+Those are the next validation targets. The current benchmark says the basic
+Praxis/Envoy to Go EPP handoff is real and measurable; it does not say every
+full-deployment feature is already covered.
 
 ## Demo Goals
 
@@ -37,9 +108,10 @@ for more realistic backend behavior.
 
 | Profile | Request path | Status |
 |---------|--------------|--------|
-| `envoy-go-epp` | Client -> Envoy ext_proc -> Go EPP -> mock backend | Runnable (Docker Envoy, local EPP, file discovery) |
-| `praxis-native` | Client -> Praxis `llmd_endpoint_picker` -> mock backend | Runnable |
-| `praxis-simple` | Client -> Praxis generic proxy -> mock backend | Runnable |
+| `envoy-go-epp` | Client -> Envoy ext_proc -> Go EPP -> backend | Runnable (Docker Envoy, local EPP, file discovery) |
+| `praxis-go-epp` | Client -> Praxis `llmd_external_epp` ext_proc -> Go EPP -> backend | Runnable (Track B) |
+| `praxis-native` | Client -> Praxis `llmd_endpoint_picker` -> backend | Runnable |
+| `praxis-simple` | Client -> Praxis generic proxy -> backend | Runnable |
 | `envoy-praxis-native` | Client -> Envoy -> Praxis native picker -> backend | Planned |
 
 The direct comparison to lead with is:
@@ -51,12 +123,22 @@ envoy-go-epp  versus  praxis-native
 That comparison isolates the cost of moving llm-d scheduling from an external
 Envoy `ext_proc` service into the Praxis proxy process.
 
-The two Praxis profiles answer different questions:
+Track B adds a third comparison:
+
+```text
+envoy-go-epp  versus  praxis-go-epp
+```
+
+That comparison isolates the Envoy-vs-Praxis proxy cost while keeping
+the same external Go EPP scheduling process.
+
+The Praxis profiles answer different questions:
 
 | Profile | Question it answers | What changes |
 |---------|---------------------|--------------|
 | `praxis-simple` | How fast is ordinary Praxis proxying for this request shape? | No llm-d scheduling; just route and forward. |
 | `praxis-native` | What is the added cost of doing llm-d endpoint selection inside Praxis? | Adds body parsing, model extraction, endpoint scoring, and direct upstream selection. |
+| `praxis-go-epp` | What is the cost of Praxis calling the external Go EPP? | Same Go EPP as envoy-go-epp, but Praxis replaces Envoy at the edge. |
 
 Use `praxis-simple` as the Praxis data-plane control. Use `praxis-native` as
 the native llm-d implementation under test. The delta between them is the
@@ -173,12 +255,38 @@ Current benchmark status:
 
 ## Source
 
-The benchmark framework lives on the Praxis `e2e-llm-d-epp-benchmarking` branch:
+The Praxis branches used by this demo are:
+
+| Branch | Purpose |
+|--------|---------|
+| `e2e-llm-d-epp-benchmarking` | Track A benchmark branch with `praxis-simple`, `praxis-native`, and `envoy-go-epp` scripts. |
+| `track-b` | Track B implementation branch without custom benchmark scripts. Use this to inspect the upstreamable Praxis changes. |
+| `track-b-benchmarking` | Track B benchmark branch with the Track B implementation plus benchmark configs/scripts for `praxis-go-epp`. Use this to reproduce Track B numbers. |
+
+Clone the Track A benchmark branch when reproducing the original Track A
+numbers:
 
 ```console
 git clone https://github.com/nerdalert/praxis.git
 cd praxis
 git checkout e2e-llm-d-epp-benchmarking
+```
+
+Clone the Track B benchmark branch when reproducing Track B numbers:
+
+```console
+git clone https://github.com/nerdalert/praxis.git praxis-track-b-benchmarking
+cd praxis-track-b-benchmarking
+git checkout track-b-benchmarking
+```
+
+Clone the Track B implementation-only branch when reviewing the Praxis code
+without benchmark-specific files:
+
+```console
+git clone https://github.com/nerdalert/praxis.git praxis-track-b
+cd praxis-track-b
+git checkout track-b
 ```
 
 The llm-d router (Go EPP) is at:
@@ -280,7 +388,31 @@ Default: 30s duration, 5s warmup, 3 runs. Same methodology as the extended
 mock benchmark but with the simulator serving OpenAI-compatible responses.
 Results go to `target/criterion/llmd-sim/`.
 
-### Step 5: Compare
+### Step 5: Run Track B Benchmarks
+
+Use the `track-b-benchmarking` Praxis branch for these commands:
+
+```console
+LLM_D_ROUTER_REPO=../llm-d-router \
+  ./benchmarks/llm-d/run-same-backend-benchmark.sh 30 5 3
+
+LLM_D_ROUTER_REPO=../llm-d-router \
+  ./benchmarks/llm-d/run-track-b-sim-benchmark.sh 30 5 3
+
+LLM_D_ROUTER_REPO=../llm-d-router \
+  ./benchmarks/llm-d/run-track-b-large-prompt.sh 30 5 3
+
+LLM_D_ROUTER_REPO=../llm-d-router \
+  ./benchmarks/llm-d/run-track-b-guidellm-sim.sh 30 4
+```
+
+Track B scripts run `praxis-simple`, `praxis-go-epp`, and `envoy-go-epp`.
+They do not run `praxis-native`; that filter is Track A-only in the current
+branches. Use the existing Track A results for `praxis-native` comparisons and
+keep cross-branch comparisons labeled as directional unless the profiles were
+run in the same session.
+
+### Step 6: Compare
 
 All scripts produce the same artifact shape. Compare the JSON throughput
 and latency values directly, or use the text reports for a quick summary.
@@ -424,13 +556,50 @@ Proxy configs live in `benchmarks/comparison/configs/llmd/`:
    mock backend, not production model-serving performance. The gap justifies
    deeper investigation with `llm-d-inference-sim` and longer benchmark runs.
 
+## Deployment Scenarios
+
+| Scenario | Environment | Request Path | Status | GPU Required |
+|----------|-------------|--------------|--------|--------------|
+| Local praxis-native | Process | Client -> Praxis -> simulator | Runnable | No |
+| Local praxis-simple | Process | Client -> Praxis proxy -> simulator | Runnable | No |
+| Local envoy-go-epp | Process + Docker | Client -> Envoy -> EPP -> simulator | Runnable | No |
+| KIND praxis-native-static | KIND | Client -> Praxis (NodePort) -> simulator pod | Validated | No |
+| KIND envoy-to-praxis-native | KIND | Client -> Envoy edge -> Praxis native -> simulator pod | Validated | No |
+| KIND envoy-go-epp | KIND | Client -> Envoy -> EPP -> simulator pod | Blocked (EPP container exits in KIND) | No |
+| KIND praxis-native-inferencepool | KIND | Client -> Praxis (InferencePool discovery) -> simulator pods | Scaffolded, not run | No |
+| KIND GuideLLM Job | KIND | GuideLLM Job -> profile Service -> simulator pod | Scaffolded, not run | No (client-side only) |
+| GPU cluster | Real cluster | Any profile -> real vLLM/SGLang | Future | Yes |
+
+### KIND Results (deployment validation, not production benchmarks)
+
+> KIND results are deployment-path validation. KIND networking, Docker
+> bridge, shared CPU, and pod scheduling add overhead. These numbers
+> should not be compared directly to local-process results.
+
+| KIND Scenario | RPS | p99 | Success |
+|---------------|-----|-----|---------|
+| praxis-native-static | 2,116 | 14.63ms | 100% |
+| envoy-to-praxis-native | 1,858 | 16.10ms | 100% |
+
+KIND manifests live in `benchmarks/llm-d/kind/manifests/`.
+Run scripts: `benchmarks/llm-d/run-kind-*.sh`.
+
+### KIND Blockers
+
+- **envoy-go-epp in KIND**: The Go EPP container image exits immediately
+  after "EPP starting" with exit code 1 in KIND. The same binary works
+  locally and the same image works in local Docker. The issue appears to
+  be in the EPP's gRPC server startup within the KIND container runtime.
+  The local-process envoy-go-epp benchmark remains the valid baseline for
+  this profile.
+
 ## Future Work
 
-- Replace mock backend with `llm-d-inference-sim` for realistic request/response
-  latency.
-- Run longer benchmarks with multiple repetitions and median selection.
-- Add `envoy-praxis-native` profile (Envoy outer ingress, Praxis scheduling).
+- Fix EPP container crash in KIND for the envoy-go-epp deployment scenario.
+- Add KIND praxis-native-inferencepool with dynamic pod discovery.
+- Run GuideLLM as a Kubernetes Job inside the cluster.
 - Add load-aware scoring, prefix-affinity, and saturation workloads.
-- Add KIND mode for Kubernetes-native comparisons.
+- GPU-backed benchmarks for real vLLM/SGLang TTFT, throughput, KV-cache,
+  and P/D data movement.
 - GPU-backed benchmarks for real vLLM/SGLang saturation, TTFT, KV-cache, and
   P/D data movement.

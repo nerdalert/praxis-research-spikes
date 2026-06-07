@@ -23,6 +23,59 @@ GuideLLM RPS should not be compared directly to Vegeta RPS because GuideLLM
 does more client-side LLM accounting and, by default, processes streaming
 responses token by token.
 
+## What Is Actually Running
+
+These results are local-process benchmarks unless a section explicitly says
+KIND. They directly run the measured data-plane pieces, not a complete llm-d
+cluster deployment.
+
+The local benchmark scripts start:
+
+- Vegeta or GuideLLM as the client.
+- Praxis and/or Envoy as the proxy under test.
+- The real Go EPP binary from `llm-d-router` for `envoy-go-epp` and
+  `praxis-go-epp`.
+- A benchmark backend: Python mock, Go mock, or `llm-d-inference-sim` in echo
+  mode.
+
+The local scripts do not start the full llm-d API Gateway, Gateway API
+controller, Kubernetes CRDs, `llm-d-deployer`, InferencePool reconciliation, or
+real vLLM/SGLang GPU workers. The Go EPP profiles use file discovery to point
+at static benchmark backends, so they validate the proxy-to-EPP data path and
+selected-endpoint handoff without depending on Kubernetes service discovery.
+
+KIND sections are deployment-path validation. They run Kubernetes manifests for
+the specific scenario being tested, but they are still not production llm-d
+deployments unless the scenario explicitly includes those control-plane
+components.
+
+## Why The Local Results Are Still Useful
+
+The local runs are representative for the request path because they exercise the
+same hot-path contract used by a full llm-d deployment: OpenAI-compatible
+request in, ext_proc or ext_proc-compatible EPP callout, selected endpoint back
+from the Go EPP, and original request forwarded to the selected backend.
+
+What changes in a full deployment is mostly how that path is created and kept
+up to date. The API Gateway/Gateway API resources, `ModelService` controller,
+`InferencePool` resources, Services, CRDs, and deployment reconciler create
+routes, EPP Deployments, backend Deployments, and discovery state. The local
+benchmarks replace that control plane with explicit process startup and file
+discovery so the proxy/EPP data path can be measured directly.
+
+That means these numbers give confidence in Track B's compatibility with the
+Go EPP request protocol and selected-endpoint handoff. They do not prove
+Kubernetes controller reconciliation, dynamic discovery, autoscaling,
+multi-endpoint scheduling quality, real GPU throughput, or P/D data movement.
+Those remain full-deployment validation items.
+
+The result would not automatically carry over if the full deployment depends on
+Kubernetes-only EPP plugins, Envoy-specific metadata that Praxis does not yet
+emit, service mesh/TLS/auth filters, dynamic route behavior, richer endpoint
+subset metadata, or real model-serving bottlenecks. Those are not expected to
+invalidate the basic ext_proc request path, but they can change correctness or
+performance once enabled.
+
 ## What This Can Test Without GPUs
 
 The current benchmark set is intentionally focused on request-path and control
@@ -99,13 +152,15 @@ vLLM/SGLang deployments.
 |---------|--------------|----------------|
 | `praxis-simple` | Client -> Praxis generic proxy -> backend | Control profile for ordinary Praxis proxying, without llm-d scheduling. |
 | `praxis-native` | Client -> Praxis `llmd_endpoint_picker` -> selected backend | Native Praxis llm-d scheduling path under test. |
+| `praxis-go-epp` | Client -> Praxis -> ext_proc-compatible call -> Go EPP -> backend | Track B path: Praxis replaces Envoy while keeping the Go EPP scheduler. |
 | `envoy-go-epp` | Client -> Envoy -> ext_proc -> Go EPP -> backend | Current-style llm-d baseline path using Envoy plus the Go EPP process. |
 
 ## Run Metadata
 
 | Field | Value |
 |-------|-------|
-| Praxis commit | `a142106` (branch: `e2e-llm-d-epp-benchmarking`) |
+| Track A Praxis commit | `a142106` (branch: `e2e-llm-d-epp-benchmarking`) |
+| Track B Praxis branch | `track-b-benchmarking` for benchmark reproduction; `track-b` for implementation-only review |
 | llm-d-router commit | `bbb20ce` |
 | llm-d-inference-sim commit | `b0b6faa` |
 | Envoy image | `envoyproxy/envoy:distroless-v1.33.2` |
@@ -130,6 +185,17 @@ vLLM/SGLang deployments.
 | `envoy-go-epp` | 3,677 | 3.99ms | 7.46ms | 9.76ms | 100% |
 
 **praxis-native vs envoy-go-epp: 3.4x throughput, 2.9x lower p99.**
+
+### Track B Simulator Echo (same session, same backend)
+
+| Profile | RPS | p50 | p95 | p99 | Success |
+|---------|-----|-----|-----|-----|---------|
+| `praxis-simple` | 11,748 | 1.11ms | 2.58ms | 3.63ms | 100% |
+| `praxis-go-epp` | 5,231 | 2.79ms | 5.11ms | 6.61ms | 100% |
+| `envoy-go-epp` | 3,604 | 4.09ms | 7.52ms | 9.71ms | 100% |
+
+**praxis-go-epp vs envoy-go-epp: 1.45x throughput, 1.47x lower p99.**
+Both use the same Go EPP, same simulator, same session.
 
 ### Per-Run Variance
 
@@ -195,7 +261,7 @@ In the Praxis native path, body parsing happens in process.
 
 **praxis-native vs envoy-go-epp: 1.2x throughput, 1.1x lower p99.**
 
-### How the Gap Changes with Prompt Size
+### How the Gap Changes with Prompt Size (Track A)
 
 | Prompt Size | praxis-native RPS | envoy-go-epp RPS | Throughput Ratio | p99 Ratio |
 |-------------|-------------------|-------------------|-----------------|-----------|
@@ -203,6 +269,18 @@ In the Praxis native path, body parsing happens in process.
 | 16 KiB | 2,821 | 1,504 | 1.9x | 1.8x |
 | 64 KiB | 436 | 342 | 1.3x | 1.1x |
 | 256 KiB | 113 | 95 | 1.2x | 1.1x |
+
+### Track B Large-Prompt (same session, same backend)
+
+| Prompt Size | praxis-simple RPS | praxis-go-epp RPS | envoy-go-epp RPS | go-epp/envoy Ratio |
+|---|---|---|---|---|
+| 16 KiB | 5,348 | 2,543 | 2,192 | 1.16x |
+| 64 KiB | 589 | 529 | 496 | 1.07x |
+| 256 KiB | 155 | 147 | 144 | 1.02x |
+
+The `praxis-go-epp` vs `envoy-go-epp` gap narrows with prompt size,
+matching the Track A pattern. At 256 KiB, both ext_proc paths are
+body-transfer bound and nearly identical.
 
 As prompt size grows, the architecture-overhead gap narrows because body
 transfer and backend processing time dominate. At small prompts, ext_proc
@@ -215,7 +293,26 @@ per-request fixed cost, not proportional to body size. Large bodies amortize
 it. The small-prompt benchmark remains the clearest isolation of architecture
 overhead.
 
-## Vegeta: Minimal Mock Backend
+## KIND Deployment Validation
+
+> KIND results are deployment-path validation, not production benchmarks.
+> KIND networking adds overhead. Compare scenarios within KIND, not KIND
+> vs local-process numbers.
+
+**Methodology:** Single 10s Vegeta run via NodePort from host.
+
+| KIND Scenario | RPS | p99 | Success |
+|---------------|-----|-----|---------|
+| praxis-native-static (NodePort 30090) | 2,116 | 14.63ms | 100% |
+| envoy-to-praxis-native (NodePort 30091) | 1,858 | 16.10ms | 100% |
+| envoy-go-epp | Blocked — EPP container exits in KIND | — | — |
+
+The Envoy-edge-to-Praxis-native scenario is slightly slower than direct
+Praxis native, which is expected from the extra Envoy hop (pass-through only,
+no ext_proc). The envoy-go-epp scenario is blocked by an EPP container crash
+that only manifests in KIND; the local-process benchmark remains valid.
+
+## Vegeta: Minimal Mock Backend (Python)
 
 **Methodology:** 3 runs x 30s measurement, 5s warmup per run, median selected.
 
@@ -229,8 +326,29 @@ overhead.
 
 **praxis-native vs envoy-go-epp: 2.3x throughput, 4.9x lower p99.**
 
-The mock backend is slower than the Go simulator, so absolute throughput is
-lower. The relative gap between profiles is consistent across both backends.
+## Vegeta: Track B — Same-Backend Go Mock (validated comparison)
+
+**Methodology:** 3 runs x 30s measurement, 5s warmup per run, median selected.
+All profiles in the same session against the same Go `net/http` mock backend.
+
+| Profile | RPS | p50 | p95 | p99 | Success |
+|---------|-----|-----|-----|-----|---------|
+| `praxis-simple` | 15,778 | 0.78ms | 1.95ms | 2.85ms | 100% |
+| `praxis-go-epp` | 5,970 | 2.44ms | 4.49ms | 5.80ms | 100% |
+| `envoy-go-epp` | 3,921 | 3.75ms | 6.94ms | 9.01ms | 100% |
+
+**praxis-go-epp vs envoy-go-epp: 1.52x throughput, 1.55x lower p99.**
+Same Go EPP, same backend, same session. This is the validated comparison.
+
+**Not directly comparable to Python-mock rows above.** The Go backend and
+Python backend have different performance characteristics, so cross-backend
+throughput and latency comparisons are directional only.
+
+The validated Track B comparison is the same-backend table above:
+`praxis-simple`, `praxis-go-epp`, and `envoy-go-epp` ran in the same session
+against the same Go backend. A four-profile table that also includes
+`praxis-native` requires either the Track A Praxis binary or the native picker
+merged into the Track B branch.
 
 ## GuideLLM: llm-d-inference-sim Echo Backend
 
@@ -255,6 +373,22 @@ band, envoy-go-epp is materially slower.
 TTFT and ITL are shallow in echo mode (the simulator returns instantly).
 These metrics become meaningful with simulated inference latency or real
 GPU backends.
+
+### Track B GuideLLM (same session, concurrent profile, concurrency=4, 30s)
+
+| Profile | RPS | TTFT median | ITL median | Tokens/s (out) |
+|---------|-----|-------------|------------|----------------|
+| `praxis-simple` | 529 | 2.92ms | 0.015ms | 10,854 |
+| `praxis-go-epp` | 500 | 3.89ms | 0.017ms | 8,479 |
+| `envoy-go-epp` | 391 | 5.58ms | 0.020ms | 8,560 |
+
+**praxis-go-epp vs envoy-go-epp: 1.28x RPS, 1.44x lower TTFT.**
+Same Go EPP, same simulator, same session.
+
+Track A `praxis-simple` (656 RPS), `praxis-native` (654 RPS), and
+`envoy-go-epp` (498 RPS) were measured in a separate Track A session.
+Track B numbers are from a different Praxis binary/commit and should
+not be directly compared to Track A GuideLLM numbers.
 
 **GuideLLM command pattern:**
 ```
