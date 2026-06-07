@@ -1,4 +1,4 @@
-# llm-d Praxis Benchmark Demo
+# llm-d Track A and Track B Benchmark Demo
 
 > **Disclaimer:** All results in this demo are from a single-node development
 > environment using `llm-d-inference-sim` in echo mode without GPU inference.
@@ -6,18 +6,35 @@
 > as production benchmarks until reproduced on properly sized and isolated
 > hardware with real model serving backends.
 
-This demo area is for public-facing benchmark instructions and presentation
-material for the Praxis llm-d integration. It is separate from the internal
-implementation planning docs in `llm-d-benchmarks/`.
+This demo area is for public-facing benchmark instructions, result tables, and
+presentation material for the Praxis llm-d integration tracks. It is the single
+benchmark location for Track A, Track B, `praxis-simple`, and the
+`envoy-go-epp` baseline.
+
+- Track A is `praxis-native`: Praxis runs the in-process
+  `llmd_endpoint_picker` and removes Envoy `ext_proc` plus the external Go EPP
+  process from the request path.
+- Track B is `praxis-go-epp`: Praxis replaces Envoy as the proxy/runtime while
+  the existing Go EPP remains the scheduling brain through
+  `llmd_external_epp`.
+- Baseline is `envoy-go-epp`: Envoy calls the existing Go EPP through
+  `ext_proc`.
 
 Related files in this directory:
-- [results.md](results.md) — Full result tables with run metadata and claim boundaries.
-- [demo-outline.md](demo-outline.md) — Slide-by-slide demo script.
+- [Consolidated Track A and Track B benchmark results](results.md) — Full result tables with run metadata and claim boundaries.
+- [Track A and Track B benchmark demo outline](demo-outline.md) — Slide-by-slide demo script.
 
-The benchmark story is focused on request-path cost:
+The benchmark story is focused on request-path cost across Track A, Track B,
+and the current Envoy plus Go EPP baseline:
 
-- the current Envoy plus Go EPP scheduling path;
-- the native Praxis `llmd_endpoint_picker` path;
+- Track A: the native Praxis `llmd_endpoint_picker` path, where Praxis performs
+  endpoint picking in process and removes Envoy `ext_proc` plus the external Go
+  EPP process from the request path;
+- Track B: the `praxis-go-epp` path, where Praxis replaces Envoy as the proxy
+  but keeps the existing Go EPP scheduling brain through the
+  `llmd_external_epp` ext_proc-compatible client filter;
+- the current `envoy-go-epp` baseline, where Envoy calls the Go EPP through
+  `ext_proc`;
 - optional compatibility paths where Envoy remains at the edge.
 
 The benchmark set has two no-GPU targets. Mock-backend runs isolate proxy and
@@ -99,7 +116,8 @@ full-deployment feature is already covered.
 ## Demo Goals
 
 - Show the request path being measured.
-- Compare Envoy plus Go EPP against native Praxis scheduling.
+- Compare Envoy plus Go EPP against Track A native Praxis scheduling.
+- Compare Envoy plus Go EPP against Track B Praxis plus Go EPP scheduling.
 - Keep mock-backend numbers honest: control-path only.
 - Make clear which results are proxy/scheduler overhead and which require GPU
   validation later.
@@ -114,23 +132,25 @@ full-deployment feature is already covered.
 | `praxis-simple` | Client -> Praxis generic proxy -> backend | Runnable |
 | `envoy-praxis-native` | Client -> Envoy -> Praxis native picker -> backend | Planned |
 
-The direct comparison to lead with is:
+Track naming:
+
+| Track | Profile | Components |
+|-------|---------|------------|
+| Track A | `praxis-native` | Praxis + in-process `llmd_endpoint_picker`; no Envoy, no `ext_proc`, no Go EPP process. |
+| Track B | `praxis-go-epp` | Praxis + `llmd_external_epp` + existing Go EPP; Praxis replaces Envoy, Go EPP remains the scheduler. |
+| Baseline | `envoy-go-epp` | Envoy + `ext_proc` + existing Go EPP. |
+
+There are two direct comparisons to lead with:
 
 ```text
-envoy-go-epp  versus  praxis-native
+Track A: envoy-go-epp  versus  praxis-native
+Track B: envoy-go-epp  versus  praxis-go-epp
 ```
 
-That comparison isolates the cost of moving llm-d scheduling from an external
-Envoy `ext_proc` service into the Praxis proxy process.
-
-Track B adds a third comparison:
-
-```text
-envoy-go-epp  versus  praxis-go-epp
-```
-
-That comparison isolates the Envoy-vs-Praxis proxy cost while keeping
-the same external Go EPP scheduling process.
+Track A isolates the cost of moving llm-d scheduling from an external Envoy
+`ext_proc` service into the Praxis proxy process. Track B isolates the
+Envoy-vs-Praxis proxy cost while keeping the same external Go EPP scheduling
+process.
 
 The Praxis profiles answer different questions:
 
@@ -259,9 +279,9 @@ The Praxis branches used by this demo are:
 
 | Branch | Purpose |
 |--------|---------|
-| `e2e-llm-d-epp-benchmarking` | Track A benchmark branch with `praxis-simple`, `praxis-native`, and `envoy-go-epp` scripts. |
-| `track-b` | Track B implementation branch without custom benchmark scripts. Use this to inspect the upstreamable Praxis changes. |
-| `track-b-benchmarking` | Track B benchmark branch with the Track B implementation plus benchmark configs/scripts for `praxis-go-epp`. Use this to reproduce Track B numbers. |
+| [`nerdalert/praxis:e2e-llm-d-epp-benchmarking`](https://github.com/nerdalert/praxis/tree/e2e-llm-d-epp-benchmarking) | Track A benchmark branch with `praxis-simple`, `praxis-native`, and `envoy-go-epp` scripts. |
+| [`nerdalert/praxis:track-b`](https://github.com/nerdalert/praxis/tree/track-b) | Track B implementation branch without custom benchmark scripts. Use this to inspect the upstreamable Praxis changes. |
+| [`nerdalert/praxis:track-b-benchmarking`](https://github.com/nerdalert/praxis/tree/track-b-benchmarking) | Track B benchmark branch with the Track B implementation plus benchmark configs/scripts for `praxis-go-epp`. Use this to reproduce Track B numbers. |
 
 Clone the Track A benchmark branch when reproducing the original Track A
 numbers:
@@ -420,71 +440,20 @@ The benchmark scripts print a summary table at the end.
 
 ## Results
 
-### llm-d-inference-sim Backend (median of 3 runs, 30s each)
+`README.md` intentionally does not duplicate benchmark tables. The source of
+truth for numbers is [the consolidated Track A and Track B benchmark results](results.md).
 
-| Profile | RPS | p50 | p95 | p99 | Success |
-|---------|-----|-----|-----|-----|---------|
-| `praxis-simple` | 12,709 | 1.01ms | 2.37ms | 3.41ms | 100% |
-| `praxis-native` | 12,551 | 1.03ms | 2.37ms | 3.42ms | 100% |
-| `envoy-go-epp` | 3,677 | 3.99ms | 7.46ms | 9.76ms | 100% |
+Use these result sections:
 
-**praxis-native vs envoy-go-epp:** 3.4x throughput, 2.9x lower p99 latency.
-
-With `llm-d-inference-sim` (echo mode, zero simulated latency), the gap
-between native Praxis and Envoy + ext_proc + Go EPP is consistent with the
-mock-backend results. `praxis-native` is within the same performance band as
-`praxis-simple` in this benchmark. The Envoy + Go EPP path shows materially
-lower throughput and higher p99 latency due to ext_proc gRPC round-trips and
-the separate Go EPP process.
-
-The `envoy-go-epp` profile uses a real Envoy, real ext_proc, and the real Go
-EPP process, but with simplified scheduling: one static endpoint, random
-picker, no full plugin scoring stack. This isolates architecture overhead,
-not complete scheduling-equivalence cost.
-
-The simulator is running in echo mode with no simulated inference latency.
-These numbers measure proxy and scheduler overhead, not model serving
-performance.
-
-### Large-Prompt Benchmark (llm-d-inference-sim, median of 3 runs, 30s each)
-
-How the architecture-overhead gap changes with request body size:
-
-| Prompt Size | praxis-native RPS | envoy-go-epp RPS | Throughput Ratio |
-|-------------|-------------------|-------------------|-----------------|
-| Small (100B) | 12,551 | 3,677 | 3.4x |
-| 16 KiB | 2,821 | 1,504 | 1.9x |
-| 64 KiB | 436 | 342 | 1.3x |
-| 256 KiB | 113 | 95 | 1.2x |
-
-The gap narrows as prompt size grows because body transfer time dominates.
-The small-prompt benchmark is the clearest isolation of architecture overhead.
-See [results.md](results.md) for full per-size tables.
-
-Run: `./benchmarks/llm-d/run-sim-large-prompt-benchmark.sh 30 5 3`
-
-### Mock Backend (median of 3 runs, 30s each)
-
-| Profile | RPS | p50 | p95 | p99 | Success |
-|---------|-----|-----|-----|-----|---------|
-| `praxis-simple` | 5,183 | 0.97ms | 2.02ms | 2.85ms | 100% |
-| `praxis-native` | 5,343 | 0.95ms | 1.97ms | 2.80ms | 100% |
-| `envoy-go-epp` | 2,284 | 5.08ms | 9.92ms | 13.65ms | 100% |
-
-**praxis-native vs envoy-go-epp:** 2.3x throughput, 4.9x lower p99 latency.
-
-The mock backend numbers are lower overall because the Python mock is slower
-than the Go simulator. The relative gap between profiles is consistent.
-
-### Quick Smoke (single run, 5s)
-
-For fast iteration, the smoke scripts run a single short measurement:
-
-| Profile | RPS | p99 | Success | Script |
-|---------|-----|-----|---------|--------|
-| `praxis-simple` | ~4,200 | ~3.0ms | 100% | `run-smoke.sh` |
-| `praxis-native` | ~5,100 | ~2.7ms | 100% | `run-smoke.sh` |
-| `envoy-go-epp` | ~2,000 | ~12ms | 100% | `run-envoy-go-epp-smoke.sh` |
+| Result set | Link |
+|------------|------|
+| Track B same-backend Go mock comparison | [results.md: Track B Vegeta Same-Backend Go Mock](results.md#track-b-vegeta-same-backend-go-mock) |
+| Track B simulator echo comparison | [results.md: Track B Vegeta Simulator Echo](results.md#track-b-vegeta-simulator-echo) |
+| Track B large-prompt body handling | [results.md: Track B Vegeta Large-Prompt Body Handling](results.md#track-b-vegeta-large-prompt-body-handling) |
+| Track B GuideLLM streaming benchmark | [results.md: Track B GuideLLM Simulator Echo](results.md#track-b-guidellm-simulator-echo) |
+| Track A simulator echo comparison | [results.md: Track A Vegeta Simulator Echo](results.md#track-a-vegeta-simulator-echo) |
+| Track A minimal mock comparison | [results.md: Track A Vegeta Minimal Mock Backend](results.md#track-a-vegeta-minimal-mock-backend) |
+| Track A GuideLLM comparison | [results.md: Track A GuideLLM Simulator Echo](results.md#track-a-guidellm-simulator-echo) |
 
 ## GuideLLM Benchmark
 
@@ -503,7 +472,9 @@ against `/v1/chat/completions` before running GuideLLM.
 
 Supported GuideLLM profiles: `concurrent`, `constant`, `poisson`, `sweep`.
 
-See [results.md](results.md) for GuideLLM result tables.
+See [Track B GuideLLM results](results.md#track-b-guidellm-simulator-echo)
+and the [Track A GuideLLM comparison](results.md#track-a-guidellm-simulator-echo)
+for the result tables.
 
 ### Harness Comparison
 
@@ -520,17 +491,25 @@ Proxy configs live in `benchmarks/comparison/configs/llmd/`:
 |------|---------|
 | `praxis-simple.yaml` | Praxis generic router + load balancer, backend on 18080 |
 | `praxis-native.yaml` | Praxis `llmd_endpoint_picker`, static endpoint on 18080 |
+| `praxis-go-epp.yaml` | Track B Praxis `llmd_external_epp`, ext_proc-compatible callout to Go EPP |
 | `envoy-go-epp.yaml` | Envoy listener on 18091, ext_proc to EPP on 9002, ORIGINAL_DST |
 | `epp-config.yaml` | Go EPP scheduling config (file discovery, random picker) |
 | `epp-endpoints.yaml` | Static endpoint list (127.0.0.1:18080) |
 
 ## Claims To Make
 
-- Praxis can run llm-d-style endpoint selection in process.
-- The benchmark harness can compare request parsing, scheduling, route
-  selection, and forwarding overhead between architectures.
-- Requests in the envoy-go-epp profile genuinely traverse Envoy, ext_proc
-  gRPC, and the Go EPP process before reaching the backend.
+- Track A proves Praxis can run llm-d-style endpoint selection in process with
+  `llmd_endpoint_picker`.
+- Track B proves Praxis can replace Envoy while still using the existing Go EPP
+  through `llmd_external_epp`.
+- The benchmark harness compares request parsing, EPP callout, route selection,
+  and forwarding overhead between `praxis-native`, `praxis-go-epp`, and
+  `envoy-go-epp`.
+- Requests in `envoy-go-epp` genuinely traverse Envoy, ext_proc gRPC, and the
+  Go EPP process before reaching the backend.
+- Requests in `praxis-go-epp` genuinely traverse Praxis, the
+  `llmd_external_epp` filter, ext_proc-compatible gRPC, and the Go EPP process
+  before reaching the backend.
 
 ## Claims Not To Make
 
@@ -545,16 +524,19 @@ Proxy configs live in `benchmarks/comparison/configs/llmd/`:
 
 ## Proposed Demo Flow
 
-1. Show the baseline request path:
+1. Show the Track A request path:
+   `Client -> Praxis -> llmd_endpoint_picker -> backend`.
+2. Show the Track B request path:
+   `Client -> Praxis -> llmd_external_epp -> Go EPP -> backend`.
+3. Show the baseline request path:
    `Client -> Envoy -> ext_proc -> Go EPP -> mock backend`.
-2. Show the Praxis native request path:
-   `Client -> Praxis -> llmd_endpoint_picker -> mock backend`.
-3. Run the Praxis smoke: `./benchmarks/llm-d/run-smoke.sh 10 2`.
-4. Run the Envoy+EPP smoke: `./benchmarks/llm-d/run-envoy-go-epp-smoke.sh 10 2`.
-5. Present the result table with throughput, p50, p95, p99, and error rate.
-6. Close with the boundary: these numbers measure control-path cost against a
-   mock backend, not production model-serving performance. The gap justifies
-   deeper investigation with `llm-d-inference-sim` and longer benchmark runs.
+4. Run or cite the Track A smoke: `./benchmarks/llm-d/run-smoke.sh 10 2`.
+5. Run the Track B same-backend benchmark:
+   `./benchmarks/llm-d/run-same-backend-benchmark.sh 30 5 3`.
+6. Present the result links in [results.md](results.md), not duplicated tables
+   in this README.
+7. Close with the boundary: these numbers measure control-path cost against
+   mock or simulator backends, not production model-serving performance.
 
 ## Deployment Scenarios
 
@@ -562,6 +544,7 @@ Proxy configs live in `benchmarks/comparison/configs/llmd/`:
 |----------|-------------|--------------|--------|--------------|
 | Local praxis-native | Process | Client -> Praxis -> simulator | Runnable | No |
 | Local praxis-simple | Process | Client -> Praxis proxy -> simulator | Runnable | No |
+| Local praxis-go-epp | Process | Client -> Praxis -> Go EPP -> simulator | Runnable | No |
 | Local envoy-go-epp | Process + Docker | Client -> Envoy -> EPP -> simulator | Runnable | No |
 | KIND praxis-native-static | KIND | Client -> Praxis (NodePort) -> simulator pod | Validated | No |
 | KIND envoy-to-praxis-native | KIND | Client -> Envoy edge -> Praxis native -> simulator pod | Validated | No |

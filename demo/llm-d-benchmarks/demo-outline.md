@@ -1,4 +1,4 @@
-# Demo Outline: Praxis llm-d Benchmarking
+# Demo Outline: llm-d Track A and Track B Benchmarking
 
 ## Opening
 

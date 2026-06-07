@@ -1,9 +1,9 @@
-# llm-d Praxis Architecture And PR Stack
+# Track A: Praxis Native llm-d Architecture And PR Stack
 
 Updated: 2026-06-01
 
-This document describes the runnable llm-d Praxis demo architecture and the
-planned Praxis PR stack behind it. It is intentionally written from the demo
+This document describes the runnable Track A llm-d Praxis-native demo
+architecture and the planned Praxis PR stack behind it. It is intentionally written from the demo
 point of view: what is in the request path, what cluster state is read, what
 each demo proves, and how the implementation should be split when it is prepared
 for upstream review.
@@ -1031,7 +1031,7 @@ issue if alternate-prefiller retry parity becomes required.
 `DEMO-01` is separate from the Praxis upstream code stack. It lives in:
 
 ```text
-https://github.com/nerdalert/praxis-research-spikes/tree/main/demo/llm-d-praxis
+https://github.com/nerdalert/praxis-research-spikes/tree/main/demo/track-a-llm-d-praxis-native
 ```
 
 Scope:

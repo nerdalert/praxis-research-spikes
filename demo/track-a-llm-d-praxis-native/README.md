@@ -1,19 +1,20 @@
-# llm-d Praxis Endpoint Picker and Native Gateway Demo
+# Track A: Praxis Native llm-d Endpoint Picker Demo
 
 | Resource | Link |
 |----------|------|
-| Deployment Guide | [deploy.md](deploy.md) |
-| Demo Scripts | [scripts/](scripts/) |
-| Architecture Reference | [architecture-and-pr-stack.md](architecture-and-pr-stack.md) |
-| Sample Output | [sample-output.md](sample-output.md) |
-| Praxis Branch | [`e2e-llm-d-epp`](https://github.com/nerdalert/praxis/tree/e2e-llm-d-epp) |
+| Track A Deployment Guide | [deploy.md](deploy.md) |
+| Track A Demo Scripts | [scripts/](scripts/) |
+| Track A Architecture and PR Stack | [architecture-and-pr-stack.md](architecture-and-pr-stack.md) |
+| Track A Sample Output | [sample-output.md](sample-output.md) |
+| Track A Praxis Branch | [`nerdalert/praxis:e2e-llm-d-epp`](https://github.com/nerdalert/praxis/tree/e2e-llm-d-epp) |
 
 ## What This Demo Proves
 
-This demo validates the implemented Praxis-native llm-d endpoint picker path
-and provides material for explaining Praxis as the native llm-d endpoint picker
-and AI gateway path. The runnable examples use Praxis as the user-facing proxy
-with the `llmd_endpoint_picker` filter. That filter understands llm-d concepts:
+This demo validates Track A: the implemented Praxis-native llm-d endpoint
+picker path. In Track A, Praxis replaces the Envoy `ext_proc` plus external Go
+EPP scheduling path with the in-process `llmd_endpoint_picker` filter. The
+runnable examples use Praxis as the user-facing proxy with that filter. It
+understands llm-d concepts:
 model-aware routing, load-based scoring, KV-cache utilization, InferencePool
 discovery, Gateway API HTTPRoute discovery, prefix-cache affinity,
 saturation/admission, P/D role hints, InferenceModelRewrite, and

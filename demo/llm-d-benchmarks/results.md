@@ -1,4 +1,4 @@
-# llm-d Praxis Benchmark Results
+# llm-d Track A and Track B Benchmark Results
 
 > **Disclaimer:** All results below are from a single-node development
 > environment using `llm-d-inference-sim` in echo mode without GPU inference.
@@ -171,12 +171,17 @@ vLLM/SGLang deployments.
 | OS | Linux 6.14.0-1018-aws |
 | Machine | AWS EC2 (single instance, no isolation) |
 
-## Vegeta: llm-d-inference-sim Echo Backend
+## Track A Vegeta Simulator Echo
 
 **Methodology:** 3 runs x 30s measurement, 5s warmup per run, median selected.
 
 **Simulator config:** echo mode, model `test-model`, port 18080,
 `--max-num-seqs 256`, zero simulated latency.
+
+Track A results use `praxis-native`, which is the in-process
+`llmd_endpoint_picker` path. This table does not include `praxis-go-epp`
+because `praxis-go-epp` is Track B and was run in a separate same-session
+Track B benchmark below.
 
 | Profile | RPS | p50 | p95 | p99 | Success |
 |---------|-----|-----|-----|-----|---------|
@@ -186,7 +191,11 @@ vLLM/SGLang deployments.
 
 **praxis-native vs envoy-go-epp: 3.4x throughput, 2.9x lower p99.**
 
-### Track B Simulator Echo (same session, same backend)
+## Track B Vegeta Simulator Echo
+
+**Methodology:** 3 runs x 30s measurement, 5s warmup per run, median selected.
+All profiles in this table ran in the same Track B session against the same
+`llm-d-inference-sim` echo backend.
 
 | Profile | RPS | p50 | p95 | p99 | Success |
 |---------|-----|-----|-----|-----|---------|
@@ -197,7 +206,7 @@ vLLM/SGLang deployments.
 **praxis-go-epp vs envoy-go-epp: 1.45x throughput, 1.47x lower p99.**
 Both use the same Go EPP, same simulator, same session.
 
-### Per-Run Variance
+### Track A Per-Run Variance
 
 | Profile | Run 1 | Run 2 | Run 3 | CV |
 |---------|-------|-------|-------|-----|
@@ -207,7 +216,7 @@ Both use the same Go EPP, same simulator, same session.
 
 Low variance across all profiles. Results are stable.
 
-### Interpretation
+### Track A Interpretation
 
 With `llm-d-inference-sim` in echo mode, `praxis-native` is within the same
 performance band as `praxis-simple`. The Envoy + Go EPP path shows materially
@@ -220,7 +229,7 @@ Go EPP process, but with simplified scheduling: one static endpoint, random
 picker, no full plugin scoring stack. This isolates architecture overhead,
 not complete scheduling-equivalence cost.
 
-## Vegeta: Large-Prompt Body Handling
+## Track A Vegeta Large-Prompt Body Handling
 
 **Methodology:** 3 runs x 30s measurement, 5s warmup per run, median selected.
 
@@ -231,7 +240,7 @@ This benchmark stresses request body handling. In the Envoy + Go EPP path,
 the request body crosses the ext_proc gRPC boundary to the Go EPP process.
 In the Praxis native path, body parsing happens in process.
 
-### 16 KiB Prompt
+### Track A 16 KiB Prompt
 
 | Profile | RPS | p99 | Success |
 |---------|-----|-----|---------|
@@ -241,7 +250,7 @@ In the Praxis native path, body parsing happens in process.
 
 **praxis-native vs envoy-go-epp: 1.9x throughput, 1.8x lower p99.**
 
-### 64 KiB Prompt
+### Track A 64 KiB Prompt
 
 | Profile | RPS | p99 | Success |
 |---------|-----|-----|---------|
@@ -251,7 +260,7 @@ In the Praxis native path, body parsing happens in process.
 
 **praxis-native vs envoy-go-epp: 1.3x throughput, 1.1x lower p99.**
 
-### 256 KiB Prompt
+### Track A 256 KiB Prompt
 
 | Profile | RPS | p99 | Success |
 |---------|-----|-----|---------|
@@ -261,7 +270,7 @@ In the Praxis native path, body parsing happens in process.
 
 **praxis-native vs envoy-go-epp: 1.2x throughput, 1.1x lower p99.**
 
-### How the Gap Changes with Prompt Size (Track A)
+### Track A Prompt-Size Summary
 
 | Prompt Size | praxis-native RPS | envoy-go-epp RPS | Throughput Ratio | p99 Ratio |
 |-------------|-------------------|-------------------|-----------------|-----------|
@@ -270,7 +279,11 @@ In the Praxis native path, body parsing happens in process.
 | 64 KiB | 436 | 342 | 1.3x | 1.1x |
 | 256 KiB | 113 | 95 | 1.2x | 1.1x |
 
-### Track B Large-Prompt (same session, same backend)
+## Track B Vegeta Large-Prompt Body Handling
+
+**Methodology:** 3 runs x 30s measurement, 5s warmup per run, median selected.
+All profiles in this table ran in the same Track B session against the same
+backend and prompt sizes.
 
 | Prompt Size | praxis-simple RPS | praxis-go-epp RPS | envoy-go-epp RPS | go-epp/envoy Ratio |
 |---|---|---|---|---|
@@ -312,7 +325,7 @@ Praxis native, which is expected from the extra Envoy hop (pass-through only,
 no ext_proc). The envoy-go-epp scenario is blocked by an EPP container crash
 that only manifests in KIND; the local-process benchmark remains valid.
 
-## Vegeta: Minimal Mock Backend (Python)
+## Track A Vegeta Minimal Mock Backend
 
 **Methodology:** 3 runs x 30s measurement, 5s warmup per run, median selected.
 
@@ -326,7 +339,7 @@ that only manifests in KIND; the local-process benchmark remains valid.
 
 **praxis-native vs envoy-go-epp: 2.3x throughput, 4.9x lower p99.**
 
-## Vegeta: Track B — Same-Backend Go Mock (validated comparison)
+## Track B Vegeta Same-Backend Go Mock
 
 **Methodology:** 3 runs x 30s measurement, 5s warmup per run, median selected.
 All profiles in the same session against the same Go `net/http` mock backend.
@@ -350,7 +363,7 @@ against the same Go backend. A four-profile table that also includes
 `praxis-native` requires either the Track A Praxis binary or the native picker
 merged into the Track B branch.
 
-## GuideLLM: llm-d-inference-sim Echo Backend
+## Track A GuideLLM Simulator Echo
 
 GuideLLM provides LLM-specific metrics (TTFT, ITL, token throughput) that
 Vegeta does not. No proxy config changes are needed: GuideLLM runs with
@@ -374,7 +387,10 @@ TTFT and ITL are shallow in echo mode (the simulator returns instantly).
 These metrics become meaningful with simulated inference latency or real
 GPU backends.
 
-### Track B GuideLLM (same session, concurrent profile, concurrency=4, 30s)
+## Track B GuideLLM Simulator Echo
+
+**Methodology:** GuideLLM concurrent profile, concurrency=4, 30s. All profiles
+in this table ran in the same Track B session against the same simulator.
 
 | Profile | RPS | TTFT median | ITL median | Tokens/s (out) |
 |---------|-----|-------------|------------|----------------|
@@ -407,7 +423,7 @@ For non-streaming (closer to raw RPS comparison with Vegeta):
   --backend-kwargs '{"validate_backend": false, "stream": false}'
 ```
 
-### GuideLLM Matrix (concurrent + poisson, 10s each)
+### Track A GuideLLM Matrix (concurrent + poisson, 10s each)
 
 Generated from `benchmarks/llm-d/summarize-guidellm-results.py`:
 
