@@ -1,4 +1,4 @@
-# Demo Outline: llm-d Track A and Track B Benchmarking
+# Demo Outline: llm-d Performance Benchmarks
 
 ## Opening
 

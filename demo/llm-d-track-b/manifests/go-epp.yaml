@@ -1,0 +1,119 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-config
+  namespace: llmd-track-b
+data:
+  config.yaml: |
+    plugins:
+      - name: file-disc
+        type: file-discovery
+        parameters:
+          path: /etc/epp/endpoints.yaml
+      - name: random-picker
+        type: random-picker
+      - name: single-profile
+        type: single-profile-handler
+        parameters:
+          picker: random-picker
+
+    schedulingProfiles:
+      - name: default
+        plugins:
+          - pluginRef: single-profile
+
+    dataLayer:
+      discovery:
+        pluginRef: file-disc
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-endpoints
+  namespace: llmd-track-b
+data:
+  # EPP_SIM_ADDRESS is replaced by the smoke script with the
+  # simulator Service ClusterIP after deployment.
+  endpoints.yaml: |
+    endpoints:
+      - name: sim-backend
+        address: "EPP_SIM_ADDRESS"
+        port: "8000"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-epp
+  namespace: llmd-track-b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: go-epp
+  template:
+    metadata:
+      labels:
+        app: go-epp
+    spec:
+      containers:
+        - name: epp
+          image: go-epp-track-b:local
+          imagePullPolicy: Never
+          args:
+            - --pool-name=bench-pool
+            - --config-file=/etc/epp/config.yaml
+            - --grpc-port=9002
+            - --grpc-health-port=9003
+            - --metrics-port=9090
+            - --secure-serving=false
+            - --health-checking=false
+            - --tracing=false
+            - --metrics-endpoint-auth=false
+            - --v=3
+          ports:
+            - containerPort: 9002
+              name: grpc
+            - containerPort: 9090
+              name: metrics
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 9090
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          volumeMounts:
+            - name: epp-config
+              mountPath: /etc/epp/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: epp-endpoints
+              mountPath: /etc/epp/endpoints.yaml
+              subPath: endpoints.yaml
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: epp-config
+          configMap:
+            name: epp-config
+        - name: epp-endpoints
+          configMap:
+            name: epp-endpoints
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-epp
+  namespace: llmd-track-b
+spec:
+  selector:
+    app: go-epp
+  ports:
+    - port: 9002
+      targetPort: 9002
+      name: grpc

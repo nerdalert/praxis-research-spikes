@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simulator
+  namespace: llmd-track-b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: simulator
+  template:
+    metadata:
+      labels:
+        app: simulator
+    spec:
+      containers:
+        - name: simulator
+          image: llmd-sim-track-b:local
+          imagePullPolicy: Never
+          args:
+            - --model=track-b-model
+            - --served-model-name=track-b-model
+            - --port=8000
+            - --logtostderr=true
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 2
+            periodSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: simulator
+  namespace: llmd-track-b
+spec:
+  selector:
+    app: simulator
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http

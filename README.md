@@ -1,12 +1,6 @@
 # Praxis Research Spikes
 
-This repository collects research spikes for Praxis.
-
-## Spikes
-
-### [Stateful Proxy Analysis](stateful-proxy/)
-
-Research and proposal material for Praxis state management across request metadata, local runtime state, shared hot-path state, durable business state, and configuration state.
+This repository collects research spikes and implementation demos for Praxis.
 
 ## llm-d Track Naming
 
@@ -54,19 +48,27 @@ Request path:
 
 This is not an llm-d scheduler. It is the generic Praxis forwarding baseline used to estimate base Praxis proxy overhead for the same request shape.
 
-## Demos
+## llm-d
 
-### [Track A: Praxis Native llm-d Endpoint Picker](demo/llm-d-praxis/)
+### Implementation Demos
 
-Validates the in-process Praxis `llmd_endpoint_picker` path. Track A removes Envoy `ext_proc` and the external Go EPP process, allowing Praxis to own model extraction, endpoint scoring, upstream selection, load/KV scoring, prefix-cache affinity, saturation/admission, P/D hints, and policy metadata.
+### [Track A: Native Praxis Scheduler](demo/llm-d-track-a/)
 
----
-
-### [llm-d Track A and Track B Benchmarks](demo/llm-d-benchmarks/)
-
-Consolidates benchmark results for Track A `praxis-native`, Track B `praxis-go-epp`, generic `praxis-simple`, and the current `envoy-go-epp` baseline. Track A removes Envoy and Go EPP with the in-process `llmd_endpoint_picker`; Track B keeps Go EPP but replaces Envoy with Praxis using `llmd_external_epp`.
+Praxis replaces Envoy and the external Go EPP with the in-process `llmd_endpoint_picker`. Validates model-aware routing, load-based scoring, KV-cache utilization, prefix-cache affinity, saturation/admission, P/D hints, and policy metadata.
 
 ---
+
+### [Track B: Praxis with Go EPP](demo/llm-d-track-b/)
+
+Praxis replaces Envoy, but keeps the existing Go EPP scheduler through `llmd_external_epp`. Validates ext_proc-compatible gRPC callout, streamed body handling, endpoint selection, fail-closed behavior, local smoke, and KIND deployment.
+
+### Benchmark Results
+
+### [llm-d Performance Benchmarks](demo/llm-d-benchmarks/)
+
+Consolidated benchmark suite comparing Track A `praxis-native`, Track B `praxis-go-epp`, generic `praxis-simple`, and the current `envoy-go-epp` baseline. Includes Vegeta throughput/latency, GuideLLM TTFT/ITL/token metrics, large-prompt body handling, and simulator echo results.
+
+## Other Demos
 
 ### [Responses API Agentic Loop](demo/v1-responses/)
 
@@ -77,6 +79,12 @@ Validates the Praxis-owned Responses API agentic orchestration loop where Praxis
 ### [A2A Task Routing](demo/a2a-task-routing/)
 
 Validates local A2A task-ownership routing, including task capture from SendMessage responses, follow-up routing by task ID, fallback for unknown tasks, and spoofing rejection.
+
+## Spikes
+
+### [Stateful Proxy Analysis](stateful-proxy/)
+
+Research and proposal material for Praxis state management across request metadata, local runtime state, shared hot-path state, durable business state, and configuration state.
 
 ## Repository Layout
 

@@ -1031,7 +1031,7 @@ issue if alternate-prefiller retry parity becomes required.
 `DEMO-01` is separate from the Praxis upstream code stack. It lives in:
 
 ```text
-https://github.com/nerdalert/praxis-research-spikes/tree/main/demo/track-a-llm-d-praxis-native
+https://github.com/nerdalert/praxis-research-spikes/tree/main/demo/llm-d-track-a
 ```
 
 Scope:

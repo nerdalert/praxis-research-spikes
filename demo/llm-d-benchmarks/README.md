@@ -1,4 +1,4 @@
-# llm-d Track A and Track B Benchmark Demo
+# llm-d Performance Benchmark Demo
 
 > **Disclaimer:** All results in this demo are from a single-node development
 > environment using `llm-d-inference-sim` in echo mode without GPU inference.

@@ -5,7 +5,7 @@
 To regenerate, run each demo script individually:
 
 ```bash
-cd demo/track-a-llm-d-praxis-native
+cd demo/llm-d-track-a
 
 # Run all demos sequentially
 bash scripts/demo1/run-static-model-aware.sh
