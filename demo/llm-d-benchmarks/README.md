@@ -117,7 +117,6 @@ Kubernetes control plane.
 |---|---|
 | Vegeta simulator echo | [results.md#vegeta-simulator-echo](results.md#vegeta-simulator-echo) |
 | Vegeta large-prompt body handling | [results.md#vegeta-large-prompt-body-handling](results.md#vegeta-large-prompt-body-handling) |
-| Vegeta mock backend | [results.md#vegeta-mock-backend](results.md#vegeta-mock-backend) |
 | GuideLLM simulator echo | [results.md#guidellm-simulator-echo](results.md#guidellm-simulator-echo) |
 
 ---
