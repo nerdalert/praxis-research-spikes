@@ -59,7 +59,7 @@ The local smoke proves the complete request path without Kubernetes:
 
 ```bash
 cd demo/llm-d-track-b
-TRACK_B_DIR=/path/to/track-b bash scripts/run-local-smoke.sh
+TRACK_B_DIR=<track-b-checkout> bash scripts/run-local-smoke.sh
 ```
 
 Verifies: HTTP 200 with unique model name, 413 for oversized body (no EPP call), 503 for EPP unavailable.
@@ -70,7 +70,7 @@ The KIND smoke proves the same path in Kubernetes:
 
 ```bash
 cd demo/llm-d-track-b
-TRACK_B_DIR=/path/to/track-b bash scripts/run-kind-smoke.sh
+TRACK_B_DIR=<track-b-checkout> bash scripts/run-kind-smoke.sh
 ```
 
 Verifies: HTTP 200, EPP log contains unique model and simulator ClusterIP, exact 503 on EPP scale-to-zero, recovery after EPP restart (restarted pod log verified).

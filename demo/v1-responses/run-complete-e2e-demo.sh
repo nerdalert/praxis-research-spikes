@@ -10,7 +10,7 @@ set -euo pipefail
 #   bash run-complete-e2e-demo.sh [output-file]
 #
 # Environment variables (optional):
-#   PRAXIS_DIR       Path to the Praxis checkout (default: ~/praxis)
+#   PRAXIS_DIR       Path to the Praxis checkout (required)
 #   PRAXIS_PORT      Praxis listener port (default: 18080)
 #   LOOP_MODEL_PORT  Non-streaming model mock port (default: 13101)
 #   STREAM_MODEL_PORT Streaming model mock port (default: 13102)
@@ -19,7 +19,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PRAXIS_DIR="${PRAXIS_DIR:-$HOME/praxis}"
+: "${PRAXIS_DIR:?Set PRAXIS_DIR to the Praxis checkout}"
 OUT="${1:-$SCRIPT_DIR/sample-output.md}"
 
 PRAXIS_PORT="${PRAXIS_PORT:-18080}"

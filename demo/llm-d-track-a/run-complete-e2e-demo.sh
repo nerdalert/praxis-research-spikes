@@ -11,8 +11,8 @@ set -euo pipefail
 #   bash run-complete-e2e-demo.sh [output-file]
 #
 # Environment variables (optional):
-#   PRAXIS_DIR                Path to the Praxis checkout (default: ~/praxis)
-#   LLM_D_INFERENCE_SIM_DIR   Path to llm-d-inference-sim (default: ~/llm-d-inference-sim)
+#   PRAXIS_DIR                Path to the Praxis checkout
+#   LLM_D_INFERENCE_SIM_DIR   Path to llm-d-inference-sim
 #   KIND_CLUSTER_NAME          KIND cluster name (default: praxis-llmd-demo)
 #   PRAXIS_NODE_PORT           NodePort for Praxis (default: 30081)
 #   PRAXIS_IMAGE               Praxis container image tag (default: praxis-epp:dev)

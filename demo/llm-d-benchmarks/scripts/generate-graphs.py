@@ -38,7 +38,7 @@ COLOR_BASELINE = "#8a8d90"
 COLORS = [COLOR_TRACK_A, COLOR_TRACK_B, COLOR_BASELINE]
 
 # ---------------------------------------------------------------------------
-# Benchmark data (from 2026-06-08 controlled rerun)
+# Benchmark data (from the 2026-06-08 data set)
 # ---------------------------------------------------------------------------
 SIM_ECHO = {
     "Track A\npraxis-native": {"rps": 12726, "p99": 3.42},

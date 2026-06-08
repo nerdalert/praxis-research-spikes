@@ -22,7 +22,7 @@ python3 scripts/generate-graphs.py
 ```
 
 The script is deterministic. Data is embedded as Python dictionaries
-sourced from the controlled rerun on 2026-06-08.
+sourced from the 2026-06-08 benchmark data set.
 
 ## Red Hat Design Rationale
 

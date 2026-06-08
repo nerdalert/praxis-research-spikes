@@ -29,7 +29,7 @@ same simulator and methodology. The EPP profiles (`praxis-go-epp` and
 |---|---|
 | Track A Praxis commit | `84b4241` (branch `e2e-llm-d-epp-benchmarking`) |
 | Track B benchmark worktree | `52f0bfb` (branch `track-b-benchmarking`; implementation base includes `e881dc9`) |
-| Go EPP binary | `llm-d-router` at `bbaff6ff` from `/home/ubuntu/praxxis/llm-d/track-b/repos/llm-d-router` |
+| Go EPP binary | `llm-d-router` at `bbaff6ff` |
 | Simulator | `llm-d-inference-sim` echo mode |
 | Vegeta | v12.12.0, rate 0, max-workers 16 |
 | GuideLLM | v0.6.0, concurrent profile, concurrency=4 |
@@ -39,9 +39,8 @@ same simulator and methodology. The EPP profiles (`praxis-go-epp` and
 
 Raw artifacts:
 
-- Track A: `/home/ubuntu/praxxis/llm-d/e2e/praxis/target/criterion/`
-- Track B: `/home/ubuntu/praxxis/llm-d/track-b/praxis-track-b-benchmarking/target/criterion/`
-- Track A copy alongside Track B: `.../target/criterion/track-a-rerun/`
+- Track A benchmark worktree: `target/criterion/`
+- Track B benchmark worktree: `target/criterion/`
 
 ---
 
@@ -61,6 +60,10 @@ Raw artifacts:
 
 ![Vegeta Simulator Echo: p99 Latency](assets/svgwrite/simulator-echo-p99.svg)
 
+**Summary:** Track A is the fastest path on the small simulator echo workload.
+Track B is clearly ahead of the Envoy baseline while still calling the same
+Go EPP scheduler as Envoy.
+
 > **Track A vs Baseline:** `praxis-native` is **3.55x higher throughput**
 > and has **2.87x lower p99** than `envoy-go-epp`. Track A removes the
 > Go EPP entirely — scheduling runs in-process with no gRPC hop.
@@ -72,6 +75,14 @@ Raw artifacts:
 > **Track A vs Track B:** `praxis-native` is **2.43x higher throughput**
 > than `praxis-go-epp`. The gap is the ext_proc gRPC round-trip that
 > Track B pays on every request.
+
+**Analysis:** This is the workload where fixed proxy and scheduler overhead is
+most visible because the simulator echo backend returns quickly. Track B and
+the Envoy baseline both call Go EPP, so their 1.46x throughput gap isolates the
+proxy/runtime difference between Praxis and Envoy. Track A removes the external
+EPP process entirely, so the 12,726 RPS result is consistent with the expected
+architecture ordering: in-process scheduling first, external EPP through Praxis
+second, external EPP through Envoy third.
 
 ---
 
@@ -89,6 +100,9 @@ Raw artifacts:
 
 ![Large-Prompt Throughput](assets/svgwrite/large-prompt-rps.svg)
 
+**Summary:** Larger request bodies compress the differences between profiles.
+Track B remains ahead of the Envoy baseline at 16 KiB and 64 KiB, but the
+256 KiB results are effectively tied.
 
 > **Track B vs Baseline ratio by prompt size:**
 >
@@ -101,6 +115,15 @@ Raw artifacts:
 The ext_proc gRPC overhead is a fixed per-request cost. At 16 KiB, the
 body transfer takes real time but the proxy hop is still visible. At
 256 KiB, body transfer completely dominates and all profiles converge.
+
+**Analysis:** The Track B advantage falls from 1.18x at 16 KiB to 1.01x at
+256 KiB, which shows that body movement dominates once the payload is large
+enough. Track A is strongest at 16 KiB, but at 64 KiB and 256 KiB its measured
+p99 is higher than the other profiles in this benchmark. That means the large-body
+result should be read as a body-handling stress case, not a general statement
+that one architecture is always lower latency at every payload size. The useful
+takeaway is narrower: Track B does not regress badly against Envoy as body size
+grows, and all paths converge when transfer cost dominates routing overhead.
 
 ---
 
@@ -118,6 +141,10 @@ body transfer takes real time but the proxy hop is still visible. At
 
 ![GuideLLM Simulator Echo](assets/svgwrite/guidellm-rps-ttft.svg)
 
+**Summary:** GuideLLM preserves the same ordering as the simulator echo Vegeta
+test: Track A first, Track B second, Envoy baseline third. Track B improves both
+RPS and TTFT relative to the Envoy baseline.
+
 > **Track B vs Baseline:** `praxis-go-epp` is **1.21x higher RPS** and
 > has **1.44x lower TTFT** than `envoy-go-epp`.
 
@@ -127,6 +154,13 @@ body transfer takes real time but the proxy hop is still visible. At
 GuideLLM RPS is lower than Vegeta because it processes streaming responses
 token by token. TTFT and ITL are shallow in echo mode — meaningful only
 with simulated inference latency or real GPU backends.
+
+**Analysis:** GuideLLM is a different client model than Vegeta, so the absolute
+RPS numbers should not be compared across tools. Within this GuideLLM run,
+Track B's 476 RPS and 4.08ms median TTFT show the same benefit over
+Envoy as the Vegeta tests. The TTFT gap is useful as a request-path signal in
+echo mode, but it is not a real generation-latency claim because the backend
+does not perform GPU inference.
 
 ---
 

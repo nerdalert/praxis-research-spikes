@@ -12,19 +12,19 @@
 ## Local Process Deployment
 
 The public demo scripts delegate to the Track B implementation checkout. Set
-`TRACK_B_DIR` if your checkout is not at `/home/ubuntu/praxxis/llm-d/track-b`.
+`TRACK_B_DIR` to that checkout before running the scripts.
 
 ### 1. Build Praxis with ext-proc
 
 ```bash
-cd /path/to/praxis
+cd <praxis-checkout>
 cargo build --release -p praxis --features ext-proc
 ```
 
 ### 2. Build Go EPP
 
 ```bash
-cd /path/to/llm-d-router
+cd <llm-d-router-checkout>
 go build -o bin/epp ./cmd/epp
 ```
 
@@ -32,7 +32,7 @@ go build -o bin/epp ./cmd/epp
 
 ```bash
 cd demo/llm-d-track-b
-TRACK_B_DIR=/path/to/track-b bash scripts/run-local-smoke.sh
+TRACK_B_DIR=<track-b-checkout> bash scripts/run-local-smoke.sh
 ```
 
 This starts the simulator, Go EPP, and Praxis, then verifies:
@@ -48,7 +48,7 @@ The KIND smoke builds all three images automatically:
 
 ```bash
 cd demo/llm-d-track-b
-TRACK_B_DIR=/path/to/track-b bash scripts/run-kind-smoke.sh
+TRACK_B_DIR=<track-b-checkout> bash scripts/run-kind-smoke.sh
 ```
 
 Or build images manually:
@@ -76,7 +76,7 @@ The KIND smoke requires the `llmd-track-b` cluster to be absent. Clean up first:
 
 ```bash
 cd demo/llm-d-track-b
-TRACK_B_DIR=/path/to/track-b bash scripts/cleanup.sh
+TRACK_B_DIR=<track-b-checkout> bash scripts/cleanup.sh
 ```
 
 ### 3. Manifests

@@ -10,15 +10,15 @@
 Clone the Praxis repo and check out the e2e branch:
 
 ```bash
-git clone https://github.com/nerdalert/praxis.git ~/praxis
-cd ~/praxis
+git clone https://github.com/nerdalert/praxis.git praxis-checkout
+cd praxis-checkout
 git checkout origin/brent-responses-api-e2e-not-for-merge
 ```
 
 Build Praxis before starting the demo:
 
 ```bash
-cd ~/praxis
+cd praxis-checkout
 cargo build -p praxis --features ai-inference
 ```
 
@@ -79,7 +79,7 @@ filter_chains:
               methods: [POST]
 YAML
 
-cd ~/praxis
+cd praxis-checkout
 RUST_LOG=praxis=info cargo run -p praxis --features ai-inference -- -c /tmp/e2e-demo.yaml
 ```
 
@@ -236,25 +236,25 @@ Set up and run the Praxis Responses API agentic loop demo. Follow these steps:
 
 1. Clone the Praxis repo and check out the e2e branch:
 
-   git clone https://github.com/nerdalert/praxis.git ~/praxis
-   cd ~/praxis
+   git clone https://github.com/nerdalert/praxis.git <praxis-checkout>
+   cd <praxis-checkout>
    git checkout origin/brent-responses-api-e2e-not-for-merge
 
 2. Clone the research spikes repo (contains the mock scripts):
 
-   git clone https://github.com/nerdalert/praxis-research-spikes.git ~/praxis-research-spikes
+   git clone https://github.com/nerdalert/praxis-research-spikes.git <spike-checkout>
 
 3. Build Praxis with the ai-inference feature:
 
-   cd ~/praxis
+   cd <praxis-checkout>
    cargo build -p praxis --features ai-inference
 
 4. Start the four mock backends in the background:
 
-   python3 ~/praxis-research-spikes/demo/v1-responses/mock-scripts/responses-loop-mock.py 13101 &
-   python3 ~/praxis-research-spikes/demo/v1-responses/mock-scripts/responses-streaming-loop-mock.py 13102 &
-   python3 ~/praxis-research-spikes/demo/v1-responses/mock-scripts/responses-state-mock.py 13103 &
-   python3 ~/praxis-research-spikes/demo/v1-responses/mock-scripts/tool-http-mock.py 14101 get_weather &
+   python3 <spike-checkout>/demo/v1-responses/mock-scripts/responses-loop-mock.py 13101 &
+   python3 <spike-checkout>/demo/v1-responses/mock-scripts/responses-streaming-loop-mock.py 13102 &
+   python3 <spike-checkout>/demo/v1-responses/mock-scripts/responses-state-mock.py 13103 &
+   python3 <spike-checkout>/demo/v1-responses/mock-scripts/tool-http-mock.py 14101 get_weather &
 
 5. Write the demo config to /tmp/e2e-demo.yaml:
 
@@ -285,7 +285,7 @@ Set up and run the Praxis Responses API agentic loop demo. Follow these steps:
 
 6. Start Praxis with the config:
 
-   cd ~/praxis
+   cd <praxis-checkout>
    RUST_LOG=praxis=info cargo run -p praxis --features ai-inference -- -c /tmp/e2e-demo.yaml
 
    Wait for "HTTP listener registered" in the output before proceeding.

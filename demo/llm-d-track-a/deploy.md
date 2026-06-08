@@ -26,12 +26,12 @@ Clone the repositories needed for the demo:
 
 ```bash
 # Praxis with full native llm-d endpoint picker implementation
-git clone https://github.com/nerdalert/praxis.git ~/praxis-demo
-cd ~/praxis-demo
+git clone https://github.com/nerdalert/praxis.git praxis-demo
+cd praxis-demo
 git checkout e2e-llm-d-epp
 
 # llm-d-inference-sim (the simulator)
-git clone https://github.com/llm-d/llm-d-inference-sim.git ~/llm-d-inference-sim
+git clone https://github.com/llm-d/llm-d-inference-sim.git llm-d-inference-sim
 ```
 
 - **Praxis branch**: [`e2e-llm-d-epp`](https://github.com/nerdalert/praxis/tree/e2e-llm-d-epp) — full native Praxis llm-d endpoint picker implementation snapshot for demo and E2E validation.
@@ -40,8 +40,8 @@ git clone https://github.com/llm-d/llm-d-inference-sim.git ~/llm-d-inference-sim
 Set environment variables (or accept defaults):
 
 ```bash
-export PRAXIS_DIR="${PRAXIS_DIR:-$HOME/praxis-demo}"
-export LLM_D_INFERENCE_SIM_DIR="${LLM_D_INFERENCE_SIM_DIR:-$HOME/llm-d-inference-sim}"
+export PRAXIS_DIR="${PRAXIS_DIR:-$(pwd)/praxis-demo}"
+export LLM_D_INFERENCE_SIM_DIR="${LLM_D_INFERENCE_SIM_DIR:-$(pwd)/llm-d-inference-sim}"
 export KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-praxis-llmd-demo}"
 export PRAXIS_NODE_PORT="${PRAXIS_NODE_PORT:-30081}"
 export PRAXIS_IMAGE="${PRAXIS_IMAGE:-praxis-epp:dev}"
