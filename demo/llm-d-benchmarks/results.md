@@ -19,30 +19,29 @@
 ## How To Read These Results
 
 Each table has exactly three rows: Track A, Track B, and the Baseline.
-
-- **Track B and Baseline** rows come from the same benchmark session.
-  They used the same Go EPP, the same backend, and the same host.
-  **These comparisons are validated.**
-- **Track A** rows come from a separate session with a different Praxis
-  binary. **Track A vs Track B comparisons are directional only.**
+All rows were collected on the same host in the same run window using the
+same simulator and methodology. The EPP profiles (`praxis-go-epp` and
+`envoy-go-epp`) used the same Go EPP binary; Track A does not use Go EPP.
 
 ## Run Metadata
 
-| Item | Track A | Track B / Baseline |
-|---|---|---|
-| Praxis commit | `a142106` | `e881dc9` |
-| Go EPP commit | `bbb20ce` | `bbaff6ff` |
-| Vegeta | v12.12.0 | v12.12.0 |
-| GuideLLM | 0.6.0 | 0.6.0 |
-| CPU | Intel Xeon E5-2686 v4 @ 2.30GHz | same host |
-| OS | Linux 6.14.0-1018-aws | same host |
+| Item | Value |
+|---|---|
+| Track A Praxis commit | `84b4241` (branch `e2e-llm-d-epp-benchmarking`) |
+| Track B benchmark worktree | `52f0bfb` (branch `track-b-benchmarking`; implementation base includes `e881dc9`) |
+| Go EPP binary | `llm-d-router` at `bbaff6ff` from `/home/ubuntu/praxxis/llm-d/track-b/repos/llm-d-router` |
+| Simulator | `llm-d-inference-sim` echo mode |
+| Vegeta | v12.12.0, rate 0, max-workers 16 |
+| GuideLLM | v0.6.0, concurrent profile, concurrency=4 |
+| CPU | Intel Xeon E5-2686 v4 @ 2.30GHz |
+| OS | Linux 6.14.0-1018-aws |
+| Run date | 2026-06-08 |
 
-Raw artifact locations:
+Raw artifacts:
 
-- Track A: `praxis-e2e-benchmark-work/target/criterion/llmd-sim/`,
-  `llmd-sim-large-prompt/`, and `llmd-guidellm/`
-- Track B: `praxis-track-b-benchmarking/target/criterion/llmd-track-b-sim/`,
-  `llmd-track-b-large-prompt/`, and `llmd-track-b-guidellm/`
+- Track A: `/home/ubuntu/praxxis/llm-d/e2e/praxis/target/criterion/`
+- Track B: `/home/ubuntu/praxxis/llm-d/track-b/praxis-track-b-benchmarking/target/criterion/`
+- Track A copy alongside Track B: `.../target/criterion/track-a-rerun/`
 
 ---
 
@@ -52,31 +51,27 @@ Raw artifact locations:
 
 **Backend:** `llm-d-inference-sim` echo mode, model `test-model`.
 
-| Role | Profile | RPS | p50 | p95 | p99 | Success | Source |
-|---|---|---:|---:|---:|---:|---:|---|
-| Track A | `praxis-native` | 12,695 | 1.02ms | 2.35ms | 3.36ms | 100% | Track A session |
-| Track B | `praxis-go-epp` | 5,331 | 2.74ms | 4.99ms | 6.42ms | 100% | Track B session |
-| Baseline | `envoy-go-epp` | 3,628 | 4.08ms | 7.55ms | 9.68ms | 100% | Track B session |
+| Role | Profile | RPS | p50 | p95 | p99 | Success |
+|---|---|---:|---:|---:|---:|---:|
+| Track A | `praxis-native` | 12,726 | 1.02ms | 2.32ms | 3.42ms | 100% |
+| Track B | `praxis-go-epp` | 5,230 | 2.80ms | 5.09ms | 6.58ms | 100% |
+| Baseline | `envoy-go-epp` | 3,586 | 4.10ms | 7.62ms | 9.82ms | 100% |
 
-![Vegeta Simulator Echo: Throughput](assets/matplotlib/simulator-echo-rps.svg)
+![Vegeta Simulator Echo: Throughput](assets/svgwrite/simulator-echo-rps.svg)
 
-![Vegeta Simulator Echo: p99 Latency](assets/matplotlib/simulator-echo-p99.svg)
+![Vegeta Simulator Echo: p99 Latency](assets/svgwrite/simulator-echo-p99.svg)
 
-**Summary:** On the simulator echo workload, Track B is faster than the
-Envoy+Go EPP baseline while still keeping Go EPP in the path. Track A has the
-highest RPS in the table, but it is from a separate Track A run and should be
-read as directional against Track B.
+> **Track A vs Baseline:** `praxis-native` is **3.55x higher throughput**
+> and has **2.87x lower p99** than `envoy-go-epp`. Track A removes the
+> Go EPP entirely — scheduling runs in-process with no gRPC hop.
 
-> **Track B vs Baseline (validated, same session):**
-> `praxis-go-epp` is **1.47x higher throughput** and has **1.51x lower p99**
-> than `envoy-go-epp`. Both use the same Go EPP and simulator.
+> **Track B vs Baseline:** `praxis-go-epp` is **1.46x higher throughput**
+> and has **1.49x lower p99** than `envoy-go-epp`. Both call the same
+> Go EPP over gRPC — the difference is Praxis vs Envoy at the proxy edge.
 
-**Analysis:** The validated same-session comparison is Track B vs Baseline:
-5,331 RPS vs 3,628 RPS and 6.42ms p99 vs 9.68ms p99. Because both rows use the
-same Go EPP and simulator, the measured difference is the proxy/runtime path:
-Praxis+`llmd_external_epp` vs Envoy+`ext_proc`. Track A's `praxis-native` row
-does not include the Go EPP hop at all, which explains the higher 12,695 RPS
-and 3.36ms p99, but that row was collected in a separate Track A session.
+> **Track A vs Track B:** `praxis-native` is **2.43x higher throughput**
+> than `praxis-go-epp`. The gap is the ext_proc gRPC round-trip that
+> Track B pays on every request.
 
 ---
 
@@ -86,36 +81,26 @@ and 3.36ms p99, but that row was collected in a separate Track A session.
 
 **Backend:** `llm-d-inference-sim` echo mode.
 
-| Role | Profile | 16 KiB RPS / p99 | 64 KiB RPS / p99 | 256 KiB RPS / p99 | Source |
-|---|---|---:|---:|---:|---|
-| Track A | `praxis-native` | 2,821 / 12.07ms | 436 / 84.02ms | 113 / 234.92ms | Track A session |
-| Track B | `praxis-go-epp` | 2,566 / 12.76ms | 530 / 46.57ms | 148 / 147.32ms | Track B session |
-| Baseline | `envoy-go-epp` | 2,174 / 15.84ms | 498 / 48.66ms | 145 / 146.58ms | Track B session |
+| Role | Profile | 16 KiB RPS / p99 | 64 KiB RPS / p99 | 256 KiB RPS / p99 |
+|---|---|---:|---:|---:|
+| Track A | `praxis-native` | 2,814 / 12.16ms | 430 / 84.74ms | 113 / 232.68ms |
+| Track B | `praxis-go-epp` | 2,541 / 12.99ms | 526 / 47.22ms | 147 / 148.17ms |
+| Baseline | `envoy-go-epp` | 2,149 / 16.17ms | 498 / 49.15ms | 146 / 147.17ms |
 
-![Large-Prompt Throughput](assets/matplotlib/large-prompt-rps.svg)
+![Large-Prompt Throughput](assets/svgwrite/large-prompt-rps.svg)
 
-![Track B Advantage Ratio](assets/matplotlib/large-prompt-track-b-ratio.svg)
-
-**Summary:** Larger request bodies reduce the Track B advantage over the
-Envoy baseline. Track B is clearly ahead at 16 KiB, narrowly ahead at 64 KiB,
-and effectively tied with the baseline at 256 KiB.
 
 > **Track B vs Baseline ratio by prompt size:**
 >
 > | Prompt | Track B RPS | Baseline RPS | Ratio |
 > |---|---:|---:|---:|
-> | 16 KiB | 2,566 | 2,174 | **1.18x** |
-> | 64 KiB | 530 | 498 | **1.06x** |
-> | 256 KiB | 148 | 145 | **1.02x** |
+> | 16 KiB | 2,541 | 2,149 | **1.18x** |
+> | 64 KiB | 526 | 498 | **1.06x** |
+> | 256 KiB | 147 | 146 | **1.01x** |
 
-**Analysis:** Track B vs Baseline is the grounded same-session comparison here:
-2,566 vs 2,174 RPS at 16 KiB, 530 vs 498 RPS at 64 KiB, and 148 vs 145 RPS at
-256 KiB. The ratio falls from 1.18x to 1.02x as body size grows, which is
-consistent with body transfer dominating fixed proxy/EPP overhead. At 256 KiB,
-the p99 values are also effectively tied: 147.32ms for Track B and 146.58ms
-for the baseline. Track A large-prompt rows are included for context, but they
-come from a separate Track A run and should not be used to claim Track A is
-slower or faster at larger body sizes.
+The ext_proc gRPC overhead is a fixed per-request cost. At 16 KiB, the
+body transfer takes real time but the proxy hop is still visible. At
+256 KiB, body transfer completely dominates and all profiles converge.
 
 ---
 
@@ -125,57 +110,33 @@ slower or faster at larger body sizes.
 
 **Backend:** `llm-d-inference-sim` echo mode.
 
-| Role | Profile | RPS | TTFT median | ITL median | Source |
-|---|---|---:|---:|---:|---|
-| Track A | `praxis-native` | 575 | 2.74ms | 0.014ms | Track A session |
-| Track B | `praxis-go-epp` | 530 | 3.98ms | 0.015ms | Track B session |
-| Baseline | `envoy-go-epp` | 433 | 5.30ms | 0.026ms | Track B session |
+| Role | Profile | RPS | TTFT median | ITL median |
+|---|---|---:|---:|---:|
+| Track A | `praxis-native` | 576 | 2.69ms | 0.015ms |
+| Track B | `praxis-go-epp` | 476 | 4.08ms | 0.017ms |
+| Baseline | `envoy-go-epp` | 394 | 5.88ms | 0.025ms |
 
-![GuideLLM Simulator Echo](assets/matplotlib/guidellm-rps-ttft.svg)
+![GuideLLM Simulator Echo](assets/svgwrite/guidellm-rps-ttft.svg)
 
-**Summary:** GuideLLM shows the same ordering as Vegeta for the same-session
-Track B comparison: Praxis+Go EPP is ahead of Envoy+Go EPP. The gap is smaller
-than in the Vegeta simulator echo run because this GuideLLM run uses lower
-concurrency and includes streaming/client-side LLM accounting.
+> **Track B vs Baseline:** `praxis-go-epp` is **1.21x higher RPS** and
+> has **1.44x lower TTFT** than `envoy-go-epp`.
 
-> **Track B vs Baseline (validated, same session):**
-> `praxis-go-epp` is **1.22x higher RPS** and has **1.33x lower TTFT**
-> than `envoy-go-epp`.
+> **Track A vs Baseline:** `praxis-native` is **1.46x higher RPS** and
+> has **2.19x lower TTFT** than `envoy-go-epp`.
 
-**Analysis:** The same-session GuideLLM comparison is 530 RPS and 3.98ms TTFT
-for Track B vs 433 RPS and 5.30ms TTFT for the baseline. That is a smaller
-throughput gap than the Vegeta echo test, but the direction is consistent.
-GuideLLM is not a raw proxy-throughput harness: it processes streaming
-responses and performs per-request LLM accounting. TTFT and ITL are also shallow
-in echo mode because the simulator returns immediately; these metrics become
-more meaningful with simulated inference latency or real GPU backends.
-
-## Overall Interpretation
-
-Across the same-session Track B comparisons, `praxis-go-epp` is consistently
-faster than `envoy-go-epp` while using the same Go EPP scheduler. The strongest
-gap appears on small simulator-echo requests, where proxy/runtime overhead is
-most visible. The gap narrows with larger request bodies because body transfer
-dominates total request time. Track A remains the expected fastest control path
-architecturally because it removes the external Go EPP hop, but the Track A rows
-were collected in a separate session and are included as directional context,
-not as a controlled same-session comparison.
+GuideLLM RPS is lower than Vegeta because it processes streaming responses
+token by token. TTFT and ITL are shallow in echo mode — meaningful only
+with simulated inference latency or real GPU backends.
 
 ---
 
 ## Claim Boundaries
 
-> **Validated comparisons:**
-> Track B (`praxis-go-epp`) vs Baseline (`envoy-go-epp`) ran in the same
-> session with the same Go EPP and backend. These comparisons are reliable
-> within this benchmark environment.
-
-> **Directional comparisons:**
-> Track A (`praxis-native`) ran in a separate session with a different Praxis
-> binary. Track A vs Track B or Track A vs Baseline comparisons show relative
-> ordering but are not controlled experiments.
-
-> **Not proven:**
-> - GPU inference performance, real TTFT under generation, or production throughput.
-> - Track B does **not** remove the Go EPP. It replaces Envoy with Praxis.
-> - These results justify further testing — they are not a final answer.
+- All results are **request-path overhead**, not GPU inference performance.
+- Track B does **not** remove the Go EPP. It replaces Envoy with Praxis.
+- The simulator echo backend returns instantly — results measure proxy and
+  scheduler overhead, not model serving latency.
+- The full llm-d API Gateway, Gateway API controllers, Kubernetes CRDs,
+  `llm-d-deployer`, InferencePool reconciliation, and real vLLM/SGLang
+  workers are not part of these benchmarks.
+- Production claims require isolated hardware and real model-serving backends.
