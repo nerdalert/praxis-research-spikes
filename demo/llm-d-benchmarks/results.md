@@ -1,8 +1,9 @@
 # llm-d Performance Benchmark Results
 
-> **Disclaimer:** All results below are from a single-node development
-> environment using `llm-d-inference-sim` in echo mode without GPU inference.
-> These are not validated production performance claims.
+> **Disclaimer:** These are early fuzzing results from a single-node
+> development environment using `llm-d-inference-sim` in echo mode without GPU
+> inference. They compare request-path behavior and relative overhead; they are
+> not production performance claims.
 
 ---
 
@@ -19,9 +20,13 @@
 ## How To Read These Results
 
 Each table has exactly three rows: Track A, Track B, and the Baseline.
-All rows were collected on the same host in the same run window using the
-same simulator and methodology. The EPP profiles (`praxis-go-epp` and
-`envoy-go-epp`) used the same Go EPP binary; Track A does not use Go EPP.
+Each workload uses the same simulator and methodology across all three
+profiles. The EPP profiles (`praxis-go-epp` and `envoy-go-epp`) use the same
+Go EPP binary; Track A does not use Go EPP.
+
+**Baseline** means the existing upstream llm-d Envoy+Go EPP request path today:
+Envoy receives the request, calls the Go EPP through `ext_proc`, receives the
+selected endpoint, and forwards through the Envoy routing path.
 
 ## Run Metadata
 
@@ -77,12 +82,22 @@ Go EPP scheduler as Envoy.
 > Track B pays on every request.
 
 **Analysis:** This is the workload where fixed proxy and scheduler overhead is
-most visible because the simulator echo backend returns quickly. Track B and
-the Envoy baseline both call Go EPP, so their 1.46x throughput gap isolates the
-proxy/runtime difference between Praxis and Envoy. Track A removes the external
-EPP process entirely, so the 12,726 RPS result is consistent with the expected
-architecture ordering: in-process scheduling first, external EPP through Praxis
-second, external EPP through Envoy third.
+most visible because the simulator echo backend returns quickly. The Baseline
+path pays for Envoy's HTTP data path, Envoy's ext_proc stream management,
+the external Go EPP call, endpoint metadata propagation, and Envoy's selected
+upstream routing. Track B keeps the same Go EPP scheduling component but
+replaces Envoy's side of that exchange with Praxis/Pingora and a narrow
+request-phase `llmd_external_epp` filter. That removes some Envoy-specific
+routing and ext_proc machinery while preserving the process hop to Go EPP,
+which is why Track B improves over Baseline but remains materially slower than
+Track A.
+
+Track A is fastest because the scheduler is no longer a second service. Model
+extraction, candidate filtering, scoring, and upstream assignment happen inside
+Praxis, so the request avoids the gRPC callout, Go EPP process scheduling, and
+the extra response interpretation needed to carry `x-gateway-destination-endpoint`
+back into the proxy. That architecture is the best fit for small requests where
+the backend returns immediately and request-path overhead dominates.
 
 ---
 
@@ -118,12 +133,21 @@ body transfer takes real time but the proxy hop is still visible. At
 
 **Analysis:** The Track B advantage falls from 1.18x at 16 KiB to 1.01x at
 256 KiB, which shows that body movement dominates once the payload is large
-enough. Track A is strongest at 16 KiB, but at 64 KiB and 256 KiB its measured
-p99 is higher than the other profiles in this benchmark. That means the large-body
-result should be read as a body-handling stress case, not a general statement
-that one architecture is always lower latency at every payload size. The useful
-takeaway is narrower: Track B does not regress badly against Envoy as body size
-grows, and all paths converge when transfer cost dominates routing overhead.
+enough. Track B has to buffer the full request body in Praxis, send that body to
+Go EPP over ext_proc-compatible gRPC, reassemble the EPP body response, and then
+forward the request to the selected backend. The Baseline performs the analogous
+body path through Envoy ext_proc. At smaller sizes, Praxis still has enough
+lower proxy/runtime overhead to stay ahead. At 256 KiB, the cost of copying,
+buffering, and transferring the body dominates the fixed proxy difference, so
+Track B and Baseline converge.
+
+Track A removes the Go EPP body callout, which helps at 16 KiB, but it still
+does native body buffering and request parsing for model-aware routing. Its
+64 KiB and 256 KiB p99 values are higher in this benchmark, so the large-body
+result should be read as a body-handling stress case rather than a blanket
+latency ranking. The important component-level takeaway is that large payloads
+shift the bottleneck away from scheduler/proxy control flow and toward body
+movement, memory pressure, and replay behavior.
 
 ---
 
@@ -156,11 +180,20 @@ token by token. TTFT and ITL are shallow in echo mode — meaningful only
 with simulated inference latency or real GPU backends.
 
 **Analysis:** GuideLLM is a different client model than Vegeta, so the absolute
-RPS numbers should not be compared across tools. Within this GuideLLM run,
-Track B's 476 RPS and 4.08ms median TTFT show the same benefit over
-Envoy as the Vegeta tests. The TTFT gap is useful as a request-path signal in
-echo mode, but it is not a real generation-latency claim because the backend
-does not perform GPU inference.
+RPS numbers should not be compared across tools. GuideLLM exercises an
+OpenAI-style client path with streaming response accounting, which makes request
+setup and time-to-first-token more visible than a simple HTTP throughput test.
+Within this GuideLLM run, Track B's 476 RPS and 4.08ms median TTFT show the
+same component-level benefit over Envoy as the Vegeta tests: the Go EPP remains
+constant, while the proxy/runtime around it changes from Envoy to Praxis.
+
+Track A again has the lowest TTFT because it avoids the external EPP round trip
+entirely. The improvement is meaningful as a proxy-path signal, especially for
+fast responses and cache-friendly workloads, but it is not a real generation
+latency claim. In a GPU-backed deployment, model prefill/decode time would
+dominate many requests; the proxy improvement would still reduce fixed overhead,
+but total end-to-end speedup would depend on prompt size, cache behavior,
+queueing, and model latency.
 
 ---
 

@@ -1,33 +1,19 @@
 # llm-d Performance Benchmarks
 
-> **Disclaimer:** All results are from a single-node development environment
-> using `llm-d-inference-sim` in echo mode without GPU inference. These are
-> not validated performance claims.
+> **Disclaimer:** These are early fuzzing results from a single-node
+> development environment using `llm-d-inference-sim` in echo mode without GPU
+> inference. They compare request-path behavior and relative overhead; they are
+> not production performance claims.
 
 This is the single benchmark location for all llm-d proxy profiles:
-Track A, Track B, the Envoy baseline, and the generic Praxis control.
+Track A, Track B, and the existing upstream llm-d Envoy+Go EPP baseline.
 
 - **[Benchmark Results](results.md)** — Full result tables, graphs, and claim boundaries.
 - **[Demo Outline](demo-outline.md)** — Slide-by-slide presentation script.
-- **[Graphics Guide](GRAPHICS.md)** — How benchmark SVG graphs are generated with svgwrite.
 
 ---
 
 ## Profiles
-
-### `praxis-simple` — Control
-
-**Role:** Generic Praxis proxy baseline. Not an llm-d scheduler.
-
-```
-Client -> Praxis router/load_balancer -> backend
-```
-
-Measures pure Praxis/Pingora forwarding overhead for the same request shape.
-No body parsing, no model extraction, no scheduling. Use this to isolate the
-incremental cost of adding llm-d scheduling.
-
----
 
 ### `praxis-native` — Track A
 
@@ -65,15 +51,17 @@ scheduling brain — Track B does **not** eliminate it.
 
 ### `envoy-go-epp` — Baseline
 
-**Role:** Current llm-d architecture. Envoy calls the Go EPP through `ext_proc`.
+**Role:** Existing upstream llm-d data-plane architecture today. Envoy calls
+the Go EPP through `ext_proc`.
 
 ```
 Client -> Envoy ext_proc -> Go EPP -> Envoy ORIGINAL_DST -> backend
 ```
 
-This is the comparison target. Envoy receives the request, calls the Go EPP
-over `ext_proc` gRPC, applies the selected destination header, and forwards
-via `ORIGINAL_DST` cluster.
+This is the comparison target for both tracks. Envoy receives the request,
+calls the Go EPP over `ext_proc` gRPC, applies the selected destination header,
+and forwards via `ORIGINAL_DST` cluster. In these docs, **Baseline** always
+means this existing upstream llm-d Envoy+Go EPP request path.
 
 > **Baseline answers:** What does the current Envoy + Go EPP architecture cost?
 
@@ -83,10 +71,9 @@ via `ORIGINAL_DST` cluster.
 
 | Comparison | What it isolates |
 |---|---|
-| **Track B vs Baseline** | Proxy cost (Praxis vs Envoy), same Go EPP |
-| **Track A vs Baseline** | Full architecture cost (in-process vs external EPP) |
-| **Control vs Track A** | Incremental cost of native llm-d scheduling |
-| **Control vs Track B** | Cost of ext_proc gRPC round-trip to Go EPP |
+| **Track B vs Baseline** | Proxy/runtime cost (Praxis vs Envoy), with the same Go EPP scheduler |
+| **Track A vs Baseline** | Full request-path architecture cost (in-process scheduling vs Envoy + external EPP) |
+| **Track A vs Track B** | Cost of preserving the external Go EPP hop rather than moving scheduling into Praxis |
 
 ---
 
@@ -97,7 +84,7 @@ These are **local-process benchmarks**. Each run starts only:
 - A load generator (Vegeta or GuideLLM)
 - One proxy (Praxis or Envoy)
 - The Go EPP process (for `envoy-go-epp` and `praxis-go-epp` only)
-- One backend (Go mock, Python mock, or `llm-d-inference-sim` echo mode)
+- One backend (`llm-d-inference-sim` echo mode for the published comparison)
 
 **Not running:** Full llm-d API Gateway, Gateway API controllers, Kubernetes
 CRDs, `llm-d-deployer`, InferencePool reconciliation, real vLLM/SGLang
@@ -106,6 +93,12 @@ workers, GPU model serving, KV-cache transfer, or P/D data movement.
 The Go EPP profiles run the **real Go EPP binary** from `llm-d-router` with
 file discovery. They validate the proxy-to-EPP handoff, not the full
 Kubernetes control plane.
+
+> **No KIND manifests here.** These benchmarks are local-process runs — they
+> start Praxis, Go EPP, and the simulator as local processes, not Kubernetes
+> pods. KIND deployment manifests live in the track demo directories:
+> - Track A: [`demo/llm-d-track-a/manifests/`](../llm-d-track-a/manifests/)
+> - Track B: [`demo/llm-d-track-b/manifests/`](../llm-d-track-b/manifests/)
 
 ---
 
@@ -132,21 +125,17 @@ Kubernetes control plane.
 - Docker (for Envoy baseline)
 - Go 1.25+ (for Go EPP)
 
-### Track A (praxis-simple + praxis-native)
+### Track A (`praxis-native`)
 
 ```bash
 cd praxis   # Track A branch: e2e-llm-d-epp-benchmarking
 ./benchmarks/llm-d/run-smoke.sh 5 1
 ```
 
-### Track B (praxis-simple + praxis-go-epp + envoy-go-epp)
+### Track B (`praxis-go-epp` + `envoy-go-epp`)
 
 ```bash
 cd praxis-track-b-benchmarking   # Track B branch: track-b-benchmarking
-
-# Same-backend Go mock (validated comparison)
-LLM_D_ROUTER_REPO=../llm-d-router \
-  ./benchmarks/llm-d/run-same-backend-benchmark.sh 30 5 3
 
 # Simulator echo
 LLM_D_ROUTER_REPO=../llm-d-router \
