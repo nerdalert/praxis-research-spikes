@@ -127,9 +127,18 @@ Track B remains ahead of the Envoy baseline at 16 KiB and 64 KiB, but the
 > | 64 KiB | 526 | 498 | **1.06x** |
 > | 256 KiB | 147 | 146 | **1.01x** |
 
-The ext_proc gRPC overhead is a fixed per-request cost. At 16 KiB, the
-body transfer takes real time but the proxy hop is still visible. At
-256 KiB, body transfer completely dominates and all profiles converge.
+Large bodies narrow the gap because the dominant cost shifts from proxy control
+flow to moving bytes: buffering the request, sending or replaying the body,
+parsing JSON, and forwarding the payload. At that point, Praxis and Envoy spend
+much of their time doing similar body I/O work, so the fixed savings from a
+lighter proxy path become a smaller share of total request time.
+
+The 256 KiB result does not prove the proxies are identical. It means this
+benchmark is dominated by body-transfer cost and local simulator behavior.
+Differences in buffering strategy, memory copies, HTTP framing, gRPC body
+handling, and backpressure can still skew results, so the large-body numbers
+should be read as a body-handling stress test rather than a pure proxy-runtime
+comparison.
 
 **Analysis:** The Track B advantage falls from 1.18x at 16 KiB to 1.01x at
 256 KiB, which shows that body movement dominates once the payload is large
