@@ -97,12 +97,12 @@ Track B extends PR #428's header-only callout into a full request-phase exchange
                     └─────────────┘
 ```
 
-The local smoke (`e2e/local-go-epp/run-smoke.sh`) starts all three processes, sends a request with a unique per-run model name, and verifies:
+The local request-path demo (`e2e/local-go-epp/run-01-request-path.sh`) starts all three processes, sends a request with a unique per-run model name, and verifies:
 - HTTP 200 with correct model in response and EPP log
 - HTTP 413 for oversized body (EPP log proves no EPP call)
 - HTTP 503 when EPP is stopped
 
-## KIND Demo Architecture
+## KIND Demo Architecture (Load-Aware Routing)
 
 ```text
                     ┌─────────────┐
@@ -117,18 +117,22 @@ The local smoke (`e2e/local-go-epp/run-smoke.sh`) starts all three processes, se
                            │ ClusterIP Service :9002
                     ┌──────▼──────┐
                     │   Go EPP    │ Deployment + ClusterIP Service
-                    │ ConfigMap   │ (file discovery, patched endpoint)
+                    │ kv-scorer + │ (file discovery, metrics scraping)
+                    │ max-picker  │
                     └──────┬──────┘
-                           │ Simulator ClusterIP :8000
-                    ┌──────▼──────┐
-                    │  Simulator  │ Deployment + ClusterIP Service
-                    └─────────────┘
+                      ┌────┴────┐
+               ┌──────▼──┐  ┌──▼──────┐
+               │  sim-a   │  │  sim-b   │
+               │ idle     │  │ busy     │
+               │ kv=10%   │  │ kv=90%   │
+               └──────────┘  └──────────┘
 ```
 
-The KIND smoke (`e2e/kind-go-epp/run-kind-smoke.sh`) builds three container images, creates a dedicated `llmd-track-b` cluster, deploys with dynamically patched EPP endpoints, and verifies:
-- HTTP 200 with unique model in response, EPP log, and simulator endpoint IP
-- HTTP 503 after scaling EPP to zero
-- HTTP 200 recovery after EPP scale-up (verified through restarted pod logs)
+The Kubernetes load-aware routing demo deploys two simulator backends with asymmetric fake-metrics. The Go EPP uses the `kv-cache-utilization-scorer` and `max-score-picker` to route requests to the idle backend. It verifies:
+- Both simulators report distinct KV cache utilization (10% vs 90%)
+- All requests return HTTP 200
+- Go EPP logs show the idle endpoint was selected
+- Simulator pod logs confirm the idle backend received the requests
 
 ## What Is Proven
 

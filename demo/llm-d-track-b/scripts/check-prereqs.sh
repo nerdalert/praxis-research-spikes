@@ -18,20 +18,17 @@ for cmd in cargo go docker kind kubectl curl; do
     fi
 done
 
-if [ -d "$PRAXIS_DIR" ]; then echo "  praxis dir: $PRAXIS_DIR"
-else echo "  praxis dir: MISSING ($PRAXIS_DIR)"; ok=false; fi
+if [ -x "$PRAXIS_BIN" ]; then echo "  praxis binary: $PRAXIS_BIN"
+else echo "  praxis binary: MISSING ($PRAXIS_BIN)"; ok=false; fi
 
-if [ -d "$EPP_DIR" ]; then echo "  epp dir: $EPP_DIR"
-else echo "  epp dir: MISSING ($EPP_DIR)"; ok=false; fi
+if [ -x "$EPP_BIN" ]; then echo "  epp binary: $EPP_BIN"
+else echo "  epp binary: MISSING ($EPP_BIN)"; ok=false; fi
 
-if [ -x "$SIM_BIN" ]; then echo "  simulator: $SIM_BIN"
-else echo "  simulator: MISSING ($SIM_BIN)"; ok=false; fi
+if [ -x "$SIM_BIN" ]; then echo "  simulator binary: $SIM_BIN"
+else echo "  simulator binary: MISSING ($SIM_BIN)"; ok=false; fi
 
-if [ -f "$LOCAL_SMOKE" ]; then echo "  local smoke: $LOCAL_SMOKE"
-else echo "  local smoke: MISSING ($LOCAL_SMOKE)"; ok=false; fi
-
-if [ -f "$KIND_SMOKE" ]; then echo "  kind smoke: $KIND_SMOKE"
-else echo "  kind smoke: MISSING ($KIND_SMOKE)"; ok=false; fi
+if [ -d "$CONFIGS_DIR" ]; then echo "  demo configs: $CONFIGS_DIR"
+else echo "  demo configs: MISSING ($CONFIGS_DIR)"; ok=false; fi
 
 if $ok; then echo ""; echo "All prerequisites OK."
 else echo ""; echo "Some prerequisites are missing."; exit 1; fi

@@ -32,7 +32,7 @@ metadata:
   name: epp-endpoints
   namespace: llmd-track-b
 data:
-  # EPP_SIM_ADDRESS is replaced by the smoke script with the
+  # EPP_SIM_ADDRESS is replaced by the Kubernetes deployment script with the
   # simulator Service ClusterIP after deployment.
   endpoints.yaml: |
     endpoints:

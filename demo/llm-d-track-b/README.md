@@ -1,43 +1,171 @@
-# Track B: Praxis with Go EPP
+# Track B: Praxis with Go EPP Demo
 
-Track B replaces Envoy with Praxis at the proxy edge while keeping the existing Go EPP as the scheduling brain.
-
-## Request Path
-
-```text
-Client
-  -> Praxis / Pingora
-  -> llmd_external_epp HttpFilter
-  -> ext_proc gRPC call (request headers + buffered body)
-  -> Go EPP scheduler (file discovery, random picker)
-  -> x-gateway-destination-endpoint response header
-  -> Praxis sets ctx.upstream from EPP-selected endpoint
-  -> selected inference backend
-```
+| Resource | Link |
+|----------|------|
+| Track B Deployment Guide | [deploy.md](deploy.md) |
+| Track B Demo Scripts | [scripts/](scripts/) |
+| Track B Architecture and PR Stack | [architecture-and-pr-stack.md](architecture-and-pr-stack.md) |
+| Track B Sample Output | [sample-output.md](sample-output.md) |
+| Track B Praxis Branch | [`nerdalert/praxis:track-b`](https://github.com/nerdalert/praxis/tree/track-b) |
+| Praxis llm-d Epic | [praxis-proxy/praxis#413](https://github.com/praxis-proxy/praxis/issues/413) |
+| Required Praxis PR | [praxis-proxy/praxis#428](https://github.com/praxis-proxy/praxis/pull/428) |
 
 ## What Track B Proves
 
-- Praxis can call the real Go EPP through an ext_proc-compatible gRPC client.
-- The Go EPP's `x-gateway-destination-endpoint` header correctly selects the upstream.
-- Request headers and the complete buffered body traverse the ext_proc stream.
-- Go EPP streamed body response chunks are reassembled.
-- `ctx.upstream` set during body pre-read survives StreamBuffer and is honored by Pingora for upstream selection.
-- Content-Length is repaired by the protocol layer after body mutation.
-- EPP unavailability returns the configured `status_on_error` (fail-closed).
-- Oversized request bodies are rejected with 413 before calling the EPP.
-- The tonic gRPC channel reconnects after EPP restart (lazy `OnceCell` init).
-- The h2 stream drain prevents `ENHANCE_YOUR_CALM` under sustained load.
+Track B proves **Praxis can replace Envoy as the proxy data plane** while
+the existing Go EPP remains the scheduler. Praxis calls the Go EPP through
+ext_proc-compatible gRPC, receives the endpoint decision, and forwards the
+original request to the selected backend.
 
-## What Track B Does Not Prove
+> **Claim boundary:** In Track B, Praxis is the proxy. Go EPP is the
+> scheduler. Praxis does not claim native model-aware, load-aware,
+> prefix-cache, P/D, or policy behavior. Those scheduling decisions
+> happen inside the Go EPP. Praxis transports and applies the EPP's
+> decision.
 
-- Response-phase ext_proc (not implemented).
-- Full Envoy ext_proc parity (Track B is a narrow request-phase-only client).
-- Kubernetes-only EPP plugins (`InferenceModelRewrite`, `InferenceObjective`, etc.).
-- True Envoy append header semantics (Track B uses overwrite, which is compatible with the Go EPP's echo pattern but not spec-correct for general ext_proc).
-- Client-disconnect cancellation propagation to the Go EPP (timeout cancellation is tested; client disconnect is not).
-- GPU-backed inference or real model scheduling quality.
+## Track A vs Track B
 
-## Filter: `llmd_external_epp`
+| | Track A | Track B |
+|---|---|---|
+| **What Praxis does** | Parses model, scores endpoints, selects upstream | Calls Go EPP, applies EPP's endpoint selection |
+| **What runs scheduling** | Praxis `llmd_endpoint_picker` (in-process) | Go EPP (external process) |
+| **Envoy in path** | No | No |
+| **Go EPP in path** | No | Yes |
+| **What the demo proves** | Praxis-owned scheduling features | Praxis carries the Go EPP scheduling decision without Envoy |
+
+## Architecture
+
+### Current Baseline (Envoy + Go EPP)
+
+```
+  Client
+    -> Envoy (ext_proc filter)
+    -> gRPC ext_proc stream to Go EPP
+    -> Go EPP: discovery, scheduling, endpoint selection
+    -> x-gateway-destination-endpoint header back to Envoy
+    -> Envoy ORIGINAL_DST cluster
+    -> selected backend
+```
+
+### Track B (Praxis + Go EPP)
+
+```
+  Client
+    -> Praxis / Pingora (llmd_external_epp filter)
+    -> ext_proc-compatible gRPC stream to Go EPP
+        - send RequestHeaders + RequestBody
+        - read selected endpoint from response
+        - drain trailing responses
+    -> x-gateway-destination-endpoint -> ctx.upstream
+    -> apply request header/body mutations from EPP
+    -> selected backend
+```
+
+### Track A (Praxis Native — for contrast)
+
+```
+  Client
+    -> Praxis (llmd_endpoint_picker filter)
+        - model extraction, endpoint scoring, upstream selection
+        - no Envoy, no ext_proc, no Go EPP
+    -> selected backend
+```
+
+## Why Track B Matters
+
+- **Lower risk.** Replacing Envoy is a smaller change than replacing both
+  Envoy and Go EPP. The Go EPP scheduling investment is preserved.
+- **Stepping stone.** Gives llm-d a Praxis/Pingora proxy path without
+  requiring the native scheduler (Track A) to be ready first.
+- **Same Go EPP semantics.** The Go EPP makes the same scheduling decisions
+  it makes today. Only the proxy changes.
+- **Measurable.** `praxis-go-epp` vs `envoy-go-epp` isolates the proxy
+  cost with the same Go EPP held constant.
+
+## Demo Matrix
+
+### P0: Core Track B Demos
+
+| # | Demo | Environment | What it proves |
+|---|---|---|---|
+| 01 | [Praxis-to-Go-EPP request path](scripts/01-praxis-to-go-epp-request-path/) | Local processes | Client -> Praxis -> Go EPP -> backend. HTTP 200, EPP log proof, no Envoy in path. |
+| 02 | [Failure behavior and recovery](scripts/02-failure-behavior-and-recovery/) | Local processes | Oversized body 413 (no EPP call), EPP-down 503, EPP restart recovery. |
+| 03 | [Kubernetes Go EPP load-aware routing](scripts/03-kubernetes-go-epp-load-aware-routing/) | KIND cluster | Two backends, asymmetric load. Go EPP scores by KV cache utilization, picks idle backend. Praxis applies the decision. |
+| 04 | [Benchmark comparison](../llm-d-benchmarks/results.md) | Local benchmark | `praxis-go-epp` vs `envoy-go-epp` with same Go EPP and backend. Vegeta + GuideLLM. |
+
+### P1: Optional (only if Go EPP is configured for the behavior)
+
+| # | Demo | What it would prove | Claim boundary |
+|---|---|---|---|
+| 5 | Go EPP model-aware selection | Go EPP performs model-aware routing; Praxis carries and applies the decision. | Praxis does **not** extract or score the model. |
+| 6 | Go EPP K8s discovery | Go EPP discovers endpoints via K8s; Praxis calls Go EPP and forwards to the chosen endpoint. | Praxis does **not** read InferencePool or discover pods. |
+
+### Not Claimed in Track B
+
+These are Track A (native Praxis) capabilities. Track B does not implement
+them — the Go EPP may perform equivalent behavior internally, but Praxis
+only transports the EPP's decision:
+
+- Praxis-native load-aware scoring
+- Praxis-native prefix-cache affinity
+- Praxis-native saturation/admission gating
+- Praxis-native P/D role routing
+- Praxis-native InferenceModelRewrite
+- Praxis-native InferenceObjective handling
+
+## Running the Demos
+
+### Setup
+
+```bash
+# Clone and build Praxis
+git clone -b track-b-benchmarking https://github.com/nerdalert/praxis.git praxis-track-b
+cd praxis-track-b && cargo build --release -p praxis --features ext-proc
+export TRACK_B_DIR="$(pwd)"
+cd ..
+
+# Clone and build Go EPP
+git clone https://github.com/llm-d/llm-d-router.git
+cd llm-d-router && go build -o bin/epp ./cmd/epp && cd ..
+export EPP_BIN="$(pwd)/llm-d-router/bin/epp"
+
+# Clone and build Simulator
+git clone https://github.com/llm-d/llm-d-inference-sim.git
+cd llm-d-inference-sim && make build && cd ..
+export SIM_BIN="$(pwd)/llm-d-inference-sim/bin/llm-d-inference-sim"
+```
+
+### Run
+
+```bash
+cd demo/llm-d-track-b
+
+# 01 - Praxis-to-Go-EPP request path
+bash scripts/01-praxis-to-go-epp-request-path/run-request-path.sh
+
+# 02 - Failure behavior and recovery
+bash scripts/02-failure-behavior-and-recovery/run-failure-recovery.sh
+
+# 03 - Kubernetes Go EPP load-aware routing (also needs track-b impl branch)
+export TRACK_B_IMPL_DIR=/path/to/praxis-track-b-impl  # git clone -b track-b ...
+bash scripts/03-kubernetes-go-epp-load-aware-routing/run-kubernetes-load-aware.sh
+
+# 04 - Benchmark results
+# Open demo/llm-d-benchmarks/results.md
+```
+
+## What Track B Does Not Claim
+
+- Not full Envoy ext_proc parity — request-phase only, no response-phase.
+- Not native in-process endpoint picking — that is Track A.
+- Not removal of the external Go EPP process.
+- Not full Gateway API provider support.
+- Not production GPU performance.
+- Track B feature categories may mirror llm-d scheduling scenarios, but
+  **ownership stays in Go EPP**. Track B validates the proxy replacement
+  path, not native scheduling parity.
+
+## Filter Configuration
 
 ```yaml
 filter: llmd_external_epp
@@ -47,34 +175,11 @@ max_request_body_bytes: 4194304
 status_on_error: 503
 ```
 
-- Requires the `ext-proc` Cargo feature: `cargo build -p praxis --features ext-proc`.
-- Buffers the full request body (`BodyMode::StreamBuffer`).
-- Calls `process_request_phase()` at `end_of_stream = true`.
-- Returns `FilterAction::Reject` for all EPP errors (always fail-closed).
-- `ImmediateResponse` from the EPP preserves the EPP's status and body.
-
-## Local Smoke
-
-The local smoke proves the complete request path without Kubernetes:
-
-```bash
-cd demo/llm-d-track-b
-TRACK_B_DIR=<track-b-checkout> bash scripts/run-local-smoke.sh
-```
-
-Verifies: HTTP 200 with unique model name, 413 for oversized body (no EPP call), 503 for EPP unavailable.
-
-## KIND Smoke
-
-The KIND smoke proves the same path in Kubernetes:
-
-```bash
-cd demo/llm-d-track-b
-TRACK_B_DIR=<track-b-checkout> bash scripts/run-kind-smoke.sh
-```
-
-Verifies: HTTP 200, EPP log contains unique model and simulator ClusterIP, exact 503 on EPP scale-to-zero, recovery after EPP restart (restarted pod log verified).
-
 ## Benchmark Results
 
-See [llm-d Benchmark Results](../llm-d-benchmarks/results.md) for Track B benchmark numbers compared against Track A and the Envoy baseline.
+See [llm-d Benchmark Results](../llm-d-benchmarks/results.md) for
+`praxis-go-epp` vs `envoy-go-epp` comparison tables.
+
+## Prerequisites
+
+See [deploy.md](deploy.md) for full setup instructions.
