@@ -1,0 +1,60 @@
+listeners:
+  - name: a2a-live
+    address: "127.0.0.1:8088"
+    filter_chains: [a2a-streaming]
+
+filter_chains:
+  - name: a2a-streaming
+    filters:
+      - filter: a2a
+        max_body_bytes: 65536
+        on_invalid: continue
+        headers:
+          method: x-praxis-a2a-method
+          family: x-praxis-a2a-family
+          task_id: x-praxis-a2a-task-id
+          streaming: x-praxis-a2a-streaming
+        task_routing:
+          enabled: true
+          store: local
+          route_cluster_header: x-praxis-a2a-route-cluster
+          ttl_seconds: 3600
+          terminal_ttl_seconds: 300
+          max_response_body_bytes: 65536
+
+      - filter: router
+        routes:
+          # Task route hit: route to owning cluster
+          - path_prefix: "/"
+            headers:
+              x-praxis-a2a-route-cluster: "agent-a"
+            cluster: "agent-a"
+          - path_prefix: "/"
+            headers:
+              x-praxis-a2a-route-cluster: "agent-b"
+            cluster: "agent-b"
+
+          # SendStreamingMessage initially to agent-a
+          - path_prefix: "/"
+            headers:
+              x-praxis-a2a-streaming: "true"
+            cluster: "agent-a"
+
+          # SendMessage initially to agent-a
+          - path_prefix: "/"
+            headers:
+              x-praxis-a2a-method: "SendMessage"
+            cluster: "agent-a"
+
+          # Default fallback to agent-b
+          - path_prefix: "/"
+            cluster: "agent-b"
+
+      - filter: load_balancer
+        clusters:
+          - name: "agent-a"
+            endpoints:
+              - "127.0.0.1:9101"
+          - name: "agent-b"
+            endpoints:
+              - "127.0.0.1:9102"
