@@ -12,9 +12,49 @@ back to the owning backend cluster.
 ## Prerequisites
 
 - Rust toolchain (stable 1.94+)
-- Python 3
+- Python 3 with `a2a-sdk` (`pip install a2a-sdk`)
 - Praxis repo checked out with the `a2a-streaming-task-capture`
   branch (or equivalent)
+
+The agent-a backend uses the official `a2a-sdk` protobuf types
+and the same camelCase serialization the SDK's JSON-RPC transport
+uses, so SSE payloads are wire-format conformant with the A2A v1.0
+spec rather than hand-crafted JSON.
+
+## Basic Flow
+
+This demo shows Praxis learning task ownership from a streaming
+A2A response:
+
+1. A client sends `SendStreamingMessage` to Praxis.
+2. Praxis routes the first request to `agent-a`.
+3. `agent-a` streams A2A v1.0 SSE events containing
+   `task-live-stream-a`.
+4. Praxis passes the stream through unchanged and remembers
+   `task-live-stream-a -> agent-a`.
+5. The client later sends `GetTask(task-live-stream-a)`.
+6. Praxis routes that follow-up request back to `agent-a` instead
+   of the default fallback backend.
+
+An unknown task ID still falls through to `agent-b`, which proves
+the known task was routed by the captured task ownership and not by
+the static fallback.
+
+## Capabilities Covered
+
+- Uses the official `a2a-sdk` types for the streaming response
+  payloads instead of hand-written event JSON.
+- Exercises the A2A v1.0 stream result shapes that can teach Praxis
+  task ownership: `task`, `statusUpdate`, and `artifactUpdate`.
+  `message` stream payloads do not carry a task route and are covered
+  by the PR's pass-through tests.
+- Proves Praxis can inspect SSE `data:` frames without changing the
+  bytes returned to the client.
+- Proves local task ownership routing for follow-up `GetTask`
+  requests.
+- Keeps the demo intentionally small. It is not a full A2A
+  conformance suite, and it does not test Redis/Valkey
+  multi-replica routing.
 
 ## Ports
 
@@ -81,7 +121,8 @@ curl -s -D- -X POST http://127.0.0.1:8088/a2a/ \
 
 Expected: HTTP 200 with `Content-Type: text/event-stream`.
 Body contains four SSE data frames with the deterministic task
-ID `task-live-stream-a` across all four A2A streaming event shapes.
+ID `task-live-stream-a` across `task`, `artifactUpdate`, and
+`statusUpdate` streaming event shapes.
 
 Praxis captures `task-live-stream-a -> agent-a` in the local
 task route store from the SSE data frames.
@@ -130,7 +171,8 @@ pkill -f "praxis.*a2a-streaming-demo"
    passes through Praxis unchanged to the client.
 4. **Fallback**: Unknown task IDs follow the static router
    fallback route.
-5. **All four A2A StreamResponse shapes**: The SSE stream
-   exercises `Task`, `TaskStatusUpdateEvent` (working),
-   `TaskArtifactUpdateEvent`, and `TaskStatusUpdateEvent`
-   (terminal/completed).
+5. **A2A route-bearing stream shapes**: The SSE stream
+   exercises `Task`, `TaskArtifactUpdateEvent`,
+   `TaskStatusUpdateEvent` (working), and
+   `TaskStatusUpdateEvent` (terminal/completed). `Message`
+   stream payloads are pass-through-only for this routing feature.

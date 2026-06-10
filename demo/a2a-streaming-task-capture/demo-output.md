@@ -1,6 +1,12 @@
 # A2A Streaming Task Capture — Demo Output
 
-Captured 2026-06-09. All three processes on localhost.
+Captured 2026-06-10. All three processes on localhost.
+
+The agent-a backend uses the official `a2a-sdk` protobuf types
+(`Task`, `TaskStatusUpdateEvent`, `TaskArtifactUpdateEvent`,
+`StreamResponse`) and the same `MessageToDict(..., preserving_proto_field_name=False)`
+camelCase serialization path that the SDK's JSON-RPC transport uses.
+This ensures the SSE payloads are wire-format conformant with A2A v1.0.
 
 ## Process Ports
 
@@ -24,7 +30,7 @@ $ curl -s -D- -X POST http://127.0.0.1:8088/a2a/ \
 ```
 HTTP/1.1 200 OK
 Server: BaseHTTP/0.6 Python/3.12.3
-Date: Tue, 09 Jun 2026 23:58:46 GMT
+Date: Wed, 10 Jun 2026 03:32:24 GMT
 Content-Type: text/event-stream
 Cache-Control: no-cache
 via: 1.1 praxis
@@ -43,11 +49,14 @@ data: {"jsonrpc": "2.0", "id": 1, "result": {"statusUpdate": {"taskId": "task-li
 data: {"jsonrpc": "2.0", "id": 1, "result": {"statusUpdate": {"taskId": "task-live-stream-a", "contextId": "ctx-live-1", "status": {"state": "TASK_STATE_COMPLETED"}}}}
 ```
 
-All four A2A v1.0 StreamResponse shapes present:
+Route-bearing A2A v1.0 StreamResponse shapes present:
 1. `result.task` — initial Task (SUBMITTED)
 2. `result.artifactUpdate` — TaskArtifactUpdateEvent
 3. `result.statusUpdate` — TaskStatusUpdateEvent (WORKING)
 4. `result.statusUpdate` — TaskStatusUpdateEvent (COMPLETED, terminal)
+
+`message` stream payloads do not carry task ownership and are
+pass-through-only for this routing feature.
 
 ## Step 2: GetTask for Streamed Task
 
@@ -104,21 +113,32 @@ $ curl -s -X POST http://127.0.0.1:8088/a2a/ \
 **PASS**: `handled_by: agent-b`. Unknown task followed the
 static fallback route to agent-b.
 
-## Praxis Route Logs
+## Step 4: Praxis Route Capture/Lookup Logs
 
 ```
-DEBUG praxis_filter::builtins::http::ai::agentic::a2a: stored task route from response has_task_id=true task_id_len=18 cluster=agent-a terminal=false
-DEBUG praxis_filter::builtins::http::ai::agentic::a2a: stored task route from response has_task_id=true task_id_len=18 cluster=agent-a terminal=false
-DEBUG praxis_filter::builtins::http::ai::agentic::a2a: stored task route from response has_task_id=true task_id_len=18 cluster=agent-a terminal=false
-DEBUG praxis_filter::builtins::http::ai::agentic::a2a: stored task route from response has_task_id=true task_id_len=18 cluster=agent-a terminal=true
-DEBUG praxis_filter::builtins::http::ai::agentic::a2a: task route lookup hit has_task_id=true task_id_len=18 lookup_hit=true cluster=agent-a method="GetTask"
-DEBUG praxis_filter::builtins::http::ai::agentic::a2a: task route lookup miss has_task_id=true task_id_len=16 lookup_hit=false method="GetTask"
+stored task route from response has_task_id=true task_id_len=18 cluster=agent-a terminal=false
+stored task route from response has_task_id=true task_id_len=18 cluster=agent-a terminal=false
+stored task route from response has_task_id=true task_id_len=18 cluster=agent-a terminal=false
+stored task route from response has_task_id=true task_id_len=18 cluster=agent-a terminal=true
+task route lookup hit  has_task_id=true task_id_len=18 lookup_hit=true  cluster=agent-a method="GetTask"
+task route lookup miss has_task_id=true task_id_len=16 lookup_hit=false                 method="GetTask"
 ```
 
-Four store operations (one per SSE event), then a hit for the
-known task and a miss for the unknown task.
+Four store operations (one per SSE event — Task, artifactUpdate,
+two statusUpdates), then a hit for the known task and a miss for
+the unknown task.
 
-## Automated Test Results
+## Step 5: Byte-for-Byte Passthrough
+
+```
+PASS: proxied body is byte-for-byte identical to direct backend response
+```
+
+The SSE body returned through Praxis is identical to calling
+the backend directly, confirming the filter inspects but never
+mutates response bytes.
+
+## Step 6: Automated Test Suite
 
 ```
 cargo test -p praxis-proxy-filter a2a
@@ -126,6 +146,9 @@ cargo test -p praxis-proxy-filter a2a
 
 cargo test -p praxis-tests-integration --test suite a2a
   46 passed; 0 failed
+
+cargo test -p praxis-tests-schema
+  159 passed; 0 failed
 
 cargo clippy --workspace --all-targets -- -D warnings
   0 errors
