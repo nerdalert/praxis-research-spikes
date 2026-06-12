@@ -1,12 +1,21 @@
 # Native `/v1/responses` Passthrough Demo
 
-This demo proves that Praxis can sit in front of a native Responses-compatible
-backend while preserving the client protocol and translating client-facing model
-names when needed.
+An operator deploys Praxis between their AI clients and inference backends,
+then configures alias rules like `codex-mini-latest` → `llama-3.3-70b`. When a
+user (or tool like Codex) sends a `/v1/responses` request asking for
+`codex-mini-latest`, Praxis silently swaps the model name in the request body
+before it reaches the backend. The client never knows. If a request arrives
+with no model at all, the operator can configure a default to be injected
+automatically.
 
-The demo uses the production `openai_responses_model_rewrite` filter from PR 1
-plus the merged upstream Responses classifier, validator, response store,
-router, and load balancer.
+The operator also gets routing headers (`x-praxis-ai-effective-model`) so they
+can send different rewritten models to different backend clusters — e.g. llama
+requests go to one GPU pool, qwen requests go to another. All other request
+fields (tools, instructions, input, streaming flags) pass through untouched.
+
+This demo validates that behavior end-to-end using the production
+`openai_responses_model_rewrite` filter plus the merged upstream Responses
+classifier, validator, response store, router, and load balancer.
 
 ## What It Proves
 
