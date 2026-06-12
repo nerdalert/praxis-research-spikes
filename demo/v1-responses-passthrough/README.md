@@ -13,26 +13,6 @@ can send different rewritten models to different backend clusters — e.g. llama
 requests go to one GPU pool, qwen requests go to another. All other request
 fields (tools, instructions, input, streaming flags) pass through untouched.
 
-This demo validates that behavior end-to-end using the production
-`openai_responses_model_rewrite` filter plus the merged upstream Responses
-classifier, validator, response store, router, and load balancer.
-
-## What It Proves
-
-- A native `POST /v1/responses` request passes through Praxis.
-- Unknown model names can pass through unchanged.
-- A configured model alias is rewritten before reaching the backend.
-- A missing model can receive a configured default.
-- SSE response bytes pass through unchanged.
-- Codex-shaped `tools` definitions are preserved.
-- Follow-up `function_call_output` items and `call_id` values are preserved.
-- `/v1/responses` and `/v1/chat/completions` can share one listener and route to
-  separate backends.
-- A real Codex CLI completes its client-owned tool loop through Praxis without
-  any API key or external service.
-- The benchmark harness can isolate classifier, rewrite, and full-flow request
-  path overhead.
-
 Praxis does not execute function tools in this passthrough profile. The client
 continues to own its tool loop.
 
@@ -86,9 +66,9 @@ to the appropriate cluster.
           └──────────────────┘
 ```
 
-### Codex E2E Tool-Loop Flow
+### Codex Tool-Loop Flow
 
-The Codex E2E test proves the full client-owned tool loop works through Praxis.
+The Codex E2E demo proves the full client-owned tool loop works through Praxis.
 The mock backend returns a deterministic `exec_command` function call, Codex
 executes it locally, then sends the result back through Praxis.
 
@@ -136,8 +116,8 @@ executes it locally, then sends the result back through Praxis.
 
 ### Mixed-Traffic Routing
 
-The smoke tests prove that Responses and Chat Completions traffic can share a
-single listener while routing to separate backend clusters.
+Responses and Chat Completions traffic can share a single listener while
+routing to separate backend clusters.
 
 ```text
                 ┌──────────────────────────────────────┐
@@ -165,49 +145,68 @@ single listener while routing to separate backend clusters.
               └──────────┘ └────┘ └─────────┘
 ```
 
-## Quick Start
+## Demo: Codex Tool Loop Through Praxis
 
-The default `PRAXIS_DIR` is the sibling checkout at `../praxis`.
+The primary demo. A real Codex CLI completes its tool loop through Praxis
+with no API key, no external service, and a deterministic mock backend.
 
-```bash
-cd demo/v1-responses-passthrough
-./scripts/run-smoke.sh
-```
-
-### Codex E2E Test
-
-Prove a real Codex CLI completes its tool loop through Praxis with no API key:
+### Automated
 
 ```bash
 ./scripts/run-codex-e2e.sh
 ```
 
-Or start the backend manually and run Codex yourself:
+### Manual
+
+Start the mock backend and Praxis, then paste the printed Codex command:
 
 ```bash
 ./scripts/start-codex-e2e-backend.sh
-# paste the printed codex command
-# then: cat ~/codex-e2e-manual/workspace/proof.txt
 ```
 
-### Regenerate Transcript
+After Codex finishes, check the proof file and backend request logs:
 
 ```bash
-./run-complete-e2e-demo.sh
+cat ~/codex-e2e-manual/workspace/proof.txt
+python3 -c "import json; print('req1 model:', json.load(open('$HOME/codex-e2e-manual/logs/backend-req-1.json'))['model'])"
+python3 -c "import json; print('req2 model:', json.load(open('$HOME/codex-e2e-manual/logs/backend-req-2.json'))['model'])"
 ```
 
-### Full Benchmark Matrix
+### What Happens
+
+| Step | What happens |
+|---:|---|
+| 1 | Codex sends `model: "codex-demo-client-name"` to Praxis |
+| 2 | Praxis rewrites model to `llama-3.3-70b` |
+| 3 | Mock backend returns SSE `exec_command` function call |
+| 4 | Codex executes command locally, creates `proof.txt` |
+| 5 | Codex sends `function_call_output` with matching `call_id` through Praxis |
+| 6 | Mock returns final text response |
+| 7 | Verifier confirms: 2 requests, rewritten model, proof content, JSONL events |
+
+### Verification (14 structural checks)
+
+| Check | What it proves |
+|---|---|
+| Exactly two backend requests | No unexpected retries or third request |
+| Both models are `llama-3.3-70b` | Praxis rewrote `codex-demo-client-name` |
+| Request 1 advertises `exec_command` | Codex tool definitions forwarded through Praxis |
+| Request 2 has `function_call_output` | Codex executed the tool and sent the result back |
+| `call_id` matches | Correlation preserved across the round trip |
+| `proof.txt` exists with exact content | The command actually ran and produced the right output |
+| JSONL has `command_execution` | Codex parsed and executed the function call |
+| JSONL has `turn.completed` | Codex finished successfully |
+
+The generated demo output is in [demo-output.md](demo-output.md).
+
+## Integration Tests
+
+Seven scenarios validating individual filter behaviors with deterministic
+mock backends. These run without Codex — pure HTTP assertions via curl.
 
 ```bash
-./scripts/run-benchmark.sh
+./scripts/run-smoke.sh
 ```
-
-See [deploy.md](deploy.md) for environment overrides and reduced validation
-runs.
-
-## Demo Scenarios
-
-### Smoke Scenarios (7)
 
 | # | Scenario | Assertion |
 |---:|---|---|
@@ -219,21 +218,19 @@ runs.
 | 6 | Function-call follow-up | `function_call_output` and `call_id` remain intact |
 | 7 | Mixed traffic | Chat Completions reaches the separate chat backend |
 
-### Codex E2E Scenario
+Regenerate the integration test transcript:
 
-| Step | What happens |
-|---:|---|
-| 1 | Codex sends `model: "codex-demo-client-name"` to Praxis |
-| 2 | Praxis rewrites model to `llama-3.3-70b` |
-| 3 | Mock backend returns SSE `exec_command` function call |
-| 4 | Codex executes command locally, creates `proof.txt` |
-| 5 | Codex sends `function_call_output` with matching `call_id` through Praxis |
-| 6 | Mock returns final text response |
-| 7 | Verifier checks: 2 requests, rewritten model, proof content, JSONL events |
+```bash
+./run-complete-e2e-demo.sh
+```
 
-The generated evidence is in [sample-output.md](sample-output.md).
+The generated output is in [integration-test-output.md](integration-test-output.md).
 
-## Benchmark Profiles
+## Benchmarks
+
+```bash
+./scripts/run-benchmark.sh
+```
 
 | Profile | Pipeline |
 |---|---|
@@ -243,36 +240,37 @@ The generated evidence is in [sample-output.md](sample-output.md).
 | `praxis-model-rewrite-alias` | format -> model alias rewrite -> router -> load balancer |
 | `praxis-full-flow` | format -> validate -> SQLite response store -> router -> load balancer |
 
-Each profile runs:
+Each profile runs small JSON, streaming SSE, 16/64/256 KiB payloads,
+Codex-shaped tools, and function-call follow-up workloads. Raw JSON artifacts
+are written under `artifacts/<UTC-run-id>/raw/`.
 
-- Small JSON request.
-- Streaming SSE request.
-- 16 KiB, 64 KiB, and 256 KiB inputs.
-- Codex-shaped request with tools.
-- Follow-up request with `function_call_output`.
-
-Raw runs are written under `artifacts/<UTC-run-id>/raw/`. Every JSON artifact
-contains p50, p95, p99, RPS, success rate, and streaming TTFE where applicable.
-The generated markdown summary reports the median across runs.
+See [deploy.md](deploy.md) for environment overrides and reduced validation
+runs.
 
 ## Files
 
 | Path | Purpose |
 |---|---|
-| `run-complete-e2e-demo.sh` | Regenerates the complete smoke transcript |
-| `scripts/run-smoke.sh` | Starts the local stack and asserts all 7 smoke scenarios |
+| **Demo** | |
 | `scripts/run-codex-e2e.sh` | Automated Codex CLI E2E: build, mock, Praxis, Codex exec, verify |
 | `scripts/start-codex-e2e-backend.sh` | Start mock + Praxis for manual Codex validation |
 | `scripts/codex_e2e_verifier.py` | Structural verifier for Codex E2E artifacts (14 checks) |
 | `scripts/test_codex_e2e.py` | 37 unit tests for the mock and verifier |
+| `mock-scripts/codex-tool-loop-mock.py` | Deterministic SSE backend for Codex E2E (2-request tool loop) |
+| `demo-output.md` | Generated Codex E2E demo output |
+| **Integration Tests** | |
+| `scripts/run-smoke.sh` | Starts the local stack and asserts all 7 IT scenarios |
+| `run-complete-e2e-demo.sh` | Regenerates the IT transcript |
+| `scripts/smoke_client.py` | IT scenario assertions and transcript rendering |
+| `integration-test-output.md` | Generated IT transcript |
+| **Benchmarks** | |
 | `scripts/run-benchmark.sh` | Runs all benchmark profiles and workloads |
-| `scripts/common.sh` | Shared process lifecycle and generated-config helpers |
-| `scripts/smoke_client.py` | Scenario assertions and transcript rendering |
 | `scripts/benchmark_client.py` | Stdlib load generator, metadata capture, and summarizer |
+| `results.md` | Publishable-results template and claim boundaries |
+| **Shared** | |
+| `scripts/common.sh` | Shared process lifecycle and generated-config helpers |
 | `mock-scripts/responses-echo-mock.py` | Deterministic JSON backend |
 | `mock-scripts/responses-streaming-echo-mock.py` | Deterministic SSE backend |
-| `mock-scripts/codex-tool-loop-mock.py` | Deterministic SSE backend for Codex E2E (2-request tool loop) |
-| `results.md` | Publishable-results template and claim boundaries |
 | `demo-outline.md` | Presentation walkthrough |
 
 ## Claim Boundaries
