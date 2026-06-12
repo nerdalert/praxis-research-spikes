@@ -16,6 +16,12 @@ fields (tools, instructions, input, streaming flags) pass through untouched.
 Praxis does not execute function tools in this passthrough profile. The client
 continues to own its tool loop.
 
+- **[Demo Output](demo-output.md)** — Verbatim Codex E2E transcript: command/output for each step of the tool loop through Praxis
+- **[Integration Test Output](integration-test-output.md)** — Generated transcript for all 7 smoke scenarios with request/response pairs
+- **[Benchmark Results](results.md)** — Median latency tables across 5 pipeline profiles and 7 workloads
+- **[Deploy Guide](deploy.md)** — Prerequisites, environment overrides, port config, and manual validation commands
+- **[Demo Outline](demo-outline.md)** — Slide-ready presentation walkthrough
+
 ## Demo: Codex Tool Loop Through Praxis
 
 The primary demo. A real Codex CLI completes its tool loop through Praxis
