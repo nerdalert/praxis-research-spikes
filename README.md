@@ -76,6 +76,12 @@ Validates the Praxis-owned Responses API agentic orchestration loop where Praxis
 
 ---
 
+### [Native `/v1/responses` Passthrough](demo/v1-responses-passthrough/)
+
+Validates native Responses passthrough, Codex-facing model alias rewrite/default injection, SSE preservation, client-owned tool-loop traffic, mixed-format routing, and request-path benchmark profiles.
+
+---
+
 ### [A2A Task Routing](demo/a2a-task-routing/)
 
 Validates local A2A task-ownership routing, including task capture from SendMessage responses, follow-up routing by task ID, fallback for unknown tasks, and spoofing rejection.
