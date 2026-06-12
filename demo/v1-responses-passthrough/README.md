@@ -16,26 +16,90 @@ fields (tools, instructions, input, streaming flags) pass through untouched.
 Praxis does not execute function tools in this passthrough profile. The client
 continues to own its tool loop.
 
+## Architecture
+
+### Passthrough Pipeline
+
+```text
+┌──────────────────────┐
+│  Codex / AI client   │
+│  model: "codex-mini" │
+└─────────┬────────────┘
+          │ POST /v1/responses
+          ▼
+┌──────────────────────────────────────────────────┐
+│  Praxis                                          │
+│                                                  │
+│  ┌────────────────────────────────────────────┐  │
+│  │ openai_responses_format                    │  │
+│  │  • classify body: Responses / Chat / other │  │
+│  │  • promote: format, model, stream, mode    │  │
+│  └────────────────┬───────────────────────────┘  │
+│                   │                              │
+│  ┌────────────────▼───────────────────────────┐  │
+│  │ openai_responses_model_rewrite             │  │
+│  │  • alias: "codex-mini" → "llama-3.3-70b"  │  │
+│  │  • default: inject when model is absent    │  │
+│  │  • header: x-praxis-ai-effective-model     │  │
+│  └────────────────┬───────────────────────────┘  │
+│                   │                              │
+│  ┌────────────────▼───────────────────────────┐  │
+│  │ router + load_balancer                     │  │
+│  │  • route by format/effective-model headers  │  │
+│  └────────────────┬───────────────────────────┘  │
+│                   │                              │
+└───────────────────┼──────────────────────────────┘
+                    │ model: "llama-3.3-70b"
+                    ▼
+          ┌──────────────────┐
+          │ Inference backend│
+          └──────────────────┘
+```
+
+### Codex Tool-Loop Flow
+
+```text
+┌────────────┐         ┌──────────┐         ┌──────────────────┐
+│ Codex CLI  │         │  Praxis  │         │  Mock Backend    │
+└─────┬──────┘         └────┬─────┘         └───────┬──────────┘
+      │                     │                       │
+      │  model: "codex-     │                       │
+      │   demo-client-name" │                       │
+      │────────────────────>│  "llama-3.3-70b"      │
+      │                     │──────────────────────>│
+      │                     │  SSE: function_call   │
+      │                     │  exec_command          │
+      │                     │<──────────────────────│
+      │  [executes locally] │                       │
+      │  proof.txt created  │                       │
+      │  function_call_     │                       │
+      │   output + call_id  │                       │
+      │────────────────────>│──────────────────────>│
+      │                     │  SSE: final text      │
+      │<────────────────────│<──────────────────────│
+      │  exit 0             │                       │
+```
+
+---
+
 ## Demo: Codex Tool Loop Through Praxis
 
 The primary demo. A real Codex CLI completes its tool loop through Praxis
 with no API key, no external service, and a deterministic mock backend.
 
-### Automated
+**Automated:**
 
 ```bash
 ./scripts/run-codex-e2e.sh
 ```
 
-### Manual
-
-Start the mock backend and Praxis, then paste the printed Codex command:
+**Manual** — start the backend, then paste the printed Codex command:
 
 ```bash
 ./scripts/start-codex-e2e-backend.sh
 ```
 
-After Codex finishes, check the proof file and backend request logs:
+**Verify:**
 
 ```bash
 cat ~/codex-e2e-manual/workspace/proof.txt
@@ -43,37 +107,29 @@ python3 -c "import json; print('req1 model:', json.load(open('$HOME/codex-e2e-ma
 python3 -c "import json; print('req2 model:', json.load(open('$HOME/codex-e2e-manual/logs/backend-req-2.json'))['model'])"
 ```
 
-### What Happens
+**What happens:**
 
-| Step | What happens |
-|---:|---|
-| 1 | Codex sends `model: "codex-demo-client-name"` to Praxis |
-| 2 | Praxis rewrites model to `llama-3.3-70b` |
-| 3 | Mock backend returns SSE `exec_command` function call |
-| 4 | Codex executes command locally, creates `proof.txt` |
-| 5 | Codex sends `function_call_output` with matching `call_id` through Praxis |
-| 6 | Mock returns final text response |
-| 7 | Verifier confirms: 2 requests, rewritten model, proof content, JSONL events |
+1. Codex sends `model: "codex-demo-client-name"` to Praxis.
+2. Praxis rewrites model to `llama-3.3-70b`.
+3. Mock backend returns SSE `exec_command` function call.
+4. Codex executes command locally, creates `proof.txt`.
+5. Codex sends `function_call_output` with matching `call_id` through Praxis.
+6. Mock returns final text response.
+7. Verifier confirms: 2 requests, rewritten model, proof content, JSONL events.
 
-### Verification (14 structural checks)
+**14 structural checks** verify request count, model rewrite, tool
+advertisement, call\_id correlation, proof file content, and Codex JSONL
+events.
 
-| Check | What it proves |
-|---|---|
-| Exactly two backend requests | No unexpected retries or third request |
-| Both models are `llama-3.3-70b` | Praxis rewrote `codex-demo-client-name` |
-| Request 1 advertises `exec_command` | Codex tool definitions forwarded through Praxis |
-| Request 2 has `function_call_output` | Codex executed the tool and sent the result back |
-| `call_id` matches | Correlation preserved across the round trip |
-| `proof.txt` exists with exact content | The command actually ran and produced the right output |
-| JSONL has `command_execution` | Codex parsed and executed the function call |
-| JSONL has `turn.completed` | Codex finished successfully |
+See [demo-output.md](demo-output.md) for the full command-by-command
+transcript with verbatim output.
 
-The generated demo output is in [demo-output.md](demo-output.md).
+---
 
 ## Integration Tests
 
 Seven scenarios validating individual filter behaviors with deterministic
-mock backends. These run without Codex — pure HTTP assertions via curl.
+mock backends. These run without Codex — pure HTTP assertions.
 
 ```bash
 ./scripts/run-smoke.sh
@@ -89,13 +145,16 @@ mock backends. These run without Codex — pure HTTP assertions via curl.
 | 6 | Function-call follow-up | `function_call_output` and `call_id` remain intact |
 | 7 | Mixed traffic | Chat Completions reaches the separate chat backend |
 
-Regenerate the integration test transcript:
+Regenerate the transcript:
 
 ```bash
 ./run-complete-e2e-demo.sh
 ```
 
-The generated output is in [integration-test-output.md](integration-test-output.md).
+See [integration-test-output.md](integration-test-output.md) for the full
+generated transcript.
+
+---
 
 ## Benchmarks
 
@@ -103,55 +162,27 @@ The generated output is in [integration-test-output.md](integration-test-output.
 ./scripts/run-benchmark.sh
 ```
 
-| Profile | Pipeline |
-|---|---|
-| `direct-backend` | client -> mock backend |
-| `praxis-format-route` | format -> router -> load balancer |
-| `praxis-model-rewrite-noop` | format -> model rewrite no-op -> router -> load balancer |
-| `praxis-model-rewrite-alias` | format -> model alias rewrite -> router -> load balancer |
-| `praxis-full-flow` | format -> validate -> SQLite response store -> router -> load balancer |
+Five pipeline profiles, each tested with seven workloads (small JSON,
+streaming SSE, 16/64/256 KiB payloads, tools, function-call follow-up).
+Raw JSON artifacts are written under `artifacts/<UTC-run-id>/raw/`.
 
-Each profile runs small JSON, streaming SSE, 16/64/256 KiB payloads,
-Codex-shaped tools, and function-call follow-up workloads. Raw JSON artifacts
-are written under `artifacts/<UTC-run-id>/raw/`.
+See [results.md](results.md) for the latest benchmark results and
+interpretation guardrails.
 
-See [deploy.md](deploy.md) for environment overrides and reduced validation
-runs.
+See [deploy.md](deploy.md) for environment overrides, port configuration,
+and reduced validation runs.
 
-## Files
-
-| Path | Purpose |
-|---|---|
-| **Demo** | |
-| `scripts/run-codex-e2e.sh` | Automated Codex CLI E2E: build, mock, Praxis, Codex exec, verify |
-| `scripts/start-codex-e2e-backend.sh` | Start mock + Praxis for manual Codex validation |
-| `scripts/codex_e2e_verifier.py` | Structural verifier for Codex E2E artifacts (14 checks) |
-| `scripts/test_codex_e2e.py` | 37 unit tests for the mock and verifier |
-| `mock-scripts/codex-tool-loop-mock.py` | Deterministic SSE backend for Codex E2E (2-request tool loop) |
-| `demo-output.md` | Generated Codex E2E demo output |
-| **Integration Tests** | |
-| `scripts/run-smoke.sh` | Starts the local stack and asserts all 7 IT scenarios |
-| `run-complete-e2e-demo.sh` | Regenerates the IT transcript |
-| `scripts/smoke_client.py` | IT scenario assertions and transcript rendering |
-| `integration-test-output.md` | Generated IT transcript |
-| **Benchmarks** | |
-| `scripts/run-benchmark.sh` | Runs all benchmark profiles and workloads |
-| `scripts/benchmark_client.py` | Stdlib load generator, metadata capture, and summarizer |
-| `results.md` | Publishable-results template and claim boundaries |
-| **Shared** | |
-| `scripts/common.sh` | Shared process lifecycle and generated-config helpers |
-| `mock-scripts/responses-echo-mock.py` | Deterministic JSON backend |
-| `mock-scripts/responses-streaming-echo-mock.py` | Deterministic SSE backend |
-| `demo-outline.md` | Presentation walkthrough |
+---
 
 ## Claim Boundaries
 
-- Mock-backend benchmarks measure local request-path overhead, not GPU inference
-  or model-serving performance.
+- Mock-backend benchmarks measure local request-path overhead, not GPU
+  inference or model-serving performance.
 - Streaming TTFE is time to the first mock SSE event, not real model
   time-to-first-token.
-- Results from fewer than three raw runs per profile/workload are validation
-  evidence only and must not be published as benchmark conclusions.
-- The Codex E2E test uses `--dangerously-bypass-approvals-and-sandbox` because
-  bubblewrap does not work in container/CI environments without `CAP_NET_ADMIN`.
+- Results from fewer than three raw runs per profile/workload are
+  validation evidence only, not publishable benchmark conclusions.
+- The Codex E2E test uses `--dangerously-bypass-approvals-and-sandbox`
+  because bubblewrap does not work in container/CI environments without
+  `CAP_NET_ADMIN`.
 - This demo does not claim deployable token-usage extraction.
