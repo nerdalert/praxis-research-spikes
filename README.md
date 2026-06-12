@@ -2,31 +2,17 @@
 
 This repository collects research spikes and implementation demos for Praxis.
 
-## llm-d Track Naming
+## llm-d Integration PoC
 
-### Track A: Praxis-native scheduling
-
-Track A is the `praxis-native` path.
-
-Request path:
-
-`Client -> Praxis llmd_endpoint_picker -> selected backend`
-
-In Track A, Praxis owns the llm-d scheduling decision in process. Praxis buffers and parses the OpenAI-compatible request body, extracts the requested model, evaluates endpoint state and scoring inputs, selects the upstream, and forwards directly to the backend.
-
-Track A removes Envoy, the Envoy `ext_proc` hop, and the external Go EPP process from the request path. It answers: "What happens if Praxis becomes the native llm-d scheduler?"
-
-### Track B: Praxis proxy with Go EPP
-
-Track B is the `praxis-go-epp` path.
+### Praxis proxy with Go EPP
 
 Request path:
 
 `Client -> Praxis llmd_external_epp -> Go EPP -> selected backend`
 
-In Track B, Praxis replaces Envoy as the proxy/runtime, but the existing Go EPP remains the scheduling brain. Praxis buffers the request body, sends an Envoy ext_proc-compatible request-phase call to Go EPP, reads the selected endpoint from the EPP response, sets the Praxis upstream, and forwards the original request to the selected backend.
+Praxis replaces Envoy as the proxy/runtime, but the existing Go EPP remains the scheduling brain. Praxis buffers the request body, sends an Envoy ext_proc-compatible request-phase call to Go EPP, reads the selected endpoint from the EPP response, sets the Praxis upstream, and forwards the original request to the selected backend.
 
-Track B does not eliminate Go EPP. It answers: "What happens if Praxis replaces Envoy while keeping the existing Go EPP scheduler?"
+This does **not** eliminate Go EPP. It answers: "What happens if Praxis replaces Envoy while keeping the existing Go EPP scheduler?"
 
 ### Baseline: Envoy with Go EPP
 
@@ -52,13 +38,7 @@ This is not an llm-d scheduler. It is the generic Praxis forwarding baseline use
 
 ### Implementation Demos
 
-### [Track A: Native Praxis Scheduler](demo/llm-d-track-a/)
-
-Praxis replaces Envoy and the external Go EPP with the in-process `llmd_endpoint_picker`. Validates model-aware routing, load-based scoring, KV-cache utilization, prefix-cache affinity, saturation/admission, P/D hints, and policy metadata.
-
----
-
-### [Track B: Praxis with Go EPP](demo/llm-d-track-b/)
+### [Praxis with Go EPP](demo/llm-d-track-b/)
 
 Praxis replaces Envoy, but keeps the existing Go EPP scheduler through `llmd_external_epp`. Validates ext_proc-compatible gRPC callout, streamed body handling, endpoint selection, fail-closed behavior, local smoke, and KIND deployment.
 
