@@ -32,12 +32,12 @@ everything runs in one process.
 
 ---
 
-### `praxis-go-epp` — Track B
+### `praxis-ext-proc-full-duplex-go-epp` — Track B
 
 **Role:** Praxis replaces Envoy but **keeps the Go EPP** as the scheduler.
 
 ```
-Client -> Praxis llmd_external_epp -> Go EPP (gRPC) -> selected backend
+Client -> Praxis ext_proc (full-duplex) -> Go EPP (gRPC) -> endpoint_selector -> selected backend
 ```
 
 Praxis buffers the request, sends headers and body to the Go EPP through an
@@ -83,7 +83,7 @@ These are **local-process benchmarks**. Each run starts only:
 
 - A load generator (Vegeta or GuideLLM)
 - One proxy (Praxis or Envoy)
-- The Go EPP process (for `envoy-go-epp` and `praxis-go-epp` only)
+- The Go EPP process (for `envoy-go-epp` and `praxis-ext-proc-full-duplex-go-epp` only)
 - One backend (`llm-d-inference-sim` echo mode for the published comparison)
 
 **Not running:** Full llm-d API Gateway, Gateway API controllers, Kubernetes
@@ -132,22 +132,22 @@ cd praxis   # Track A branch: e2e-llm-d-epp-benchmarking
 ./benchmarks/llm-d/run-smoke.sh 5 1
 ```
 
-### Track B (`praxis-go-epp` + `envoy-go-epp`)
+### Track B Full-Duplex (`praxis-ext-proc-full-duplex-go-epp` + `envoy-go-epp`)
 
 ```bash
-cd praxis-track-b-benchmarking   # Track B branch: track-b-benchmarking
+# Use the ext_proc Praxis/llm-d POC branch
+git clone -b ext-proc-llm-d-praxis-poc-v2 https://github.com/nerdalert/praxis.git
+cd praxis
 
 # Simulator echo
+PRAXIS_BIN=./target/release/praxis \
 LLM_D_ROUTER_REPO=../llm-d-router \
-  ./benchmarks/llm-d/run-track-b-sim-benchmark.sh 30 5 3
+  ./benchmarks/llm-d/run-full-duplex-sim-benchmark.sh 30 5 3
 
 # Large-prompt body handling
+PRAXIS_BIN=./target/release/praxis \
 LLM_D_ROUTER_REPO=../llm-d-router \
-  ./benchmarks/llm-d/run-track-b-large-prompt.sh 30 5 3
-
-# GuideLLM
-LLM_D_ROUTER_REPO=../llm-d-router \
-  ./benchmarks/llm-d/run-track-b-guidellm-sim.sh 30 4
+  ./benchmarks/llm-d/run-full-duplex-large-prompt.sh 30 5 3
 ```
 
 ### Envoy + Go EPP Baseline
@@ -165,17 +165,15 @@ LLM_D_ROUTER_REPO=../llm-d-router \
 | Branch | Purpose |
 |---|---|
 | `nerdalert/praxis:e2e-llm-d-epp-benchmarking` | Track A benchmark branch |
-| `nerdalert/praxis:track-b` | Track B implementation (no benchmark scripts) |
-| `nerdalert/praxis:track-b-benchmarking` | Track B benchmark branch |
+| `nerdalert/praxis:ext-proc-llm-d-praxis-poc-v2` | ext_proc Praxis/llm-d POC branch (Track B full-duplex) |
 
 ```bash
-# Track A
+# Track A (unchanged)
 git clone https://github.com/nerdalert/praxis.git
 cd praxis && git checkout e2e-llm-d-epp-benchmarking
 
-# Track B benchmarks
-git clone https://github.com/nerdalert/praxis.git praxis-track-b-benchmarking
-cd praxis-track-b-benchmarking && git checkout track-b-benchmarking
+# Track B full-duplex
+git clone -b ext-proc-llm-d-praxis-poc-v2 https://github.com/nerdalert/praxis.git
 
 # Go EPP
 git clone https://github.com/llm-d/llm-d-router.git

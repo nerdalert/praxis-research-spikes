@@ -1,0 +1,35 @@
+# Track B v2 Praxis container: generic ext_proc full-duplex.
+#
+# Uses the generic ext_proc filter + endpoint_selector composition.
+# No llmd_external_epp or legacy compatibility implementation.
+
+# ---------------------------------------------------------------------------
+# Build stage
+# ---------------------------------------------------------------------------
+FROM rust:1.94-alpine AS builder
+
+RUN apk add --no-cache musl-dev cmake make protobuf-dev
+
+WORKDIR /build
+COPY . .
+
+# Remove workspace members that are not needed for the binary.
+RUN sed -i '/xtask/d; /benchmarks/d; /tests\//d' Cargo.toml
+
+RUN cargo build --release -p praxis --features ext-proc \
+    && strip target/release/praxis
+
+# ---------------------------------------------------------------------------
+# Runtime stage
+# ---------------------------------------------------------------------------
+FROM alpine:3.23
+
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S praxis && adduser -S praxis -G praxis
+
+COPY --from=builder /build/target/release/praxis /usr/local/bin/praxis
+
+USER praxis
+EXPOSE 8080 9901
+ENTRYPOINT ["praxis"]
+CMD ["-c", "/etc/praxis/praxis.yaml"]

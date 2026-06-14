@@ -1,117 +1,116 @@
 # Track B Sample Output
 
-## 01 - Praxis-to-Go-EPP Request Path
+## Local Request Routing (8 assertions)
 
 ```console
-$ TRACK_B_DIR=<track-b-checkout> bash scripts/run-01-request-path.sh
+$ bash scripts/local-request-routing/run-request-routing.sh
 
 === checking ports ===
 all ports free
 
-=== starting inference simulator (model=track-b-demo-1780721862-2001356) ===
+=== starting inference simulator (model=fd03-smoke-...) ===
 sim ready (2s)
 
-=== starting Go EPP on gRPC port 9002 ===
+=== starting Go EPP on gRPC port 9102 ===
 epp ready (2s)
 
-=== starting Praxis on port 18091 ===
+=== starting Praxis on port 18191 ===
 praxis ready (2s)
 
-=== request path: successful request (model=track-b-demo-1780721862-2001356) ===
+=== test 1: successful request path ===
 HTTP status: 200
-Response: {"id":"chatcmpl-...","model":"track-b-demo-1780721862-2001356",
-           "object":"chat.completion",...}
-PASS: response contains correct model name
-PASS: simulator process alive through request
-PASS: EPP log contains model 'track-b-demo-1780721862-2001356'
-PASS: successful request path
+PASS: correct model in response — EPP selected the right backend
 
-=== failure behavior: oversized body (marker=oversize-track-b-demo-1780721862-2001356) ===
-HTTP status for oversized body: 413
-PASS: oversized body returns 413
-PASS: EPP log does not contain 'oversize-track-b-demo-...' — no EPP call
+=== test 2: malicious client destination ignored ===
+HTTP status with malicious header: 200
+PASS: malicious header ignored — response from correct backend
 
-=== failure behavior: EPP unavailable ===
+=== test 3: repeated requests ===
+  request 1: 200 OK
+  request 2: 200 OK
+  request 3: 200 OK
+PASS: 3 repeated requests succeeded
+
+=== test 4: EPP unavailable -> exact 503 ===
 HTTP status with EPP down: 503
 PASS: EPP unavailable returns exactly 503
 
-=== all request-path tests passed ===
+=== test 5: EPP restart recovery ===
+HTTP status after EPP restart: 200
+PASS: EPP restart recovery — requests succeed after restart
+
+=== test 6: destination header stripped at backend wire boundary ===
+PASS: internal destination header absent from simulator logs
+
+=== test 7: one Process invocation per HTTP request ===
+Process invocations for one request: 1
+PASS: exactly one Process invocation per HTTP request
+
+=== test 8: request body preserved ===
+PASS: request body semantic content observed exactly once at backend
+
+=== all 8 FD03 full-duplex smoke checks passed ===
 --- cleanup ---
 all harness processes stopped
 ```
 
-**What this proves:**
-- Praxis called the real Go EPP and received the selected endpoint
-- The request body reached the simulator without framing errors
-- Oversized bodies are rejected before calling the EPP (413)
-- EPP unavailability returns the configured `status_on_error` (503)
-
-## 03 - Kubernetes Go EPP Load-Aware Routing
+## KIND Deployment (5 assertions)
 
 ```console
-$ bash scripts/03-kubernetes-go-epp-load-aware-routing/run-kubernetes-load-aware.sh
+$ bash scripts/kind-request-routing/run-request-routing.sh
 
-[track-b] 03 - Kubernetes Go EPP Load-Aware Routing
-[track-b] Two backends serve the same model with asymmetric load:
-[track-b]   sim-a: idle  (kv-cache 10%, 0 running, 0 waiting)
-[track-b]   sim-b: busy  (kv-cache 90%, 8 running, 3 waiting)
+=== preflight ===
+tools: kind=kind v0.31.0, kubectl=Client Version: v1.34.3
 
-[track-b] Preflight
-[track-b] preflight OK
+=== building Praxis v2 image ===
+=== building Go EPP image ===
+=== building simulator image ===
+all images present
 
-[track-b] Building container images
-[track-b] images built
+=== creating KIND cluster llmd-track-b-v2 ===
+=== loading images into KIND ===
 
-[track-b] Creating KIND cluster 'llmd-track-b'
-[track-b] cluster ready
+=== deploying to namespace llmd-track-b-v2 ===
+waiting for simulator...
+deployment "simulator" successfully rolled out
+waiting for Go EPP...
+deployment "go-epp" successfully rolled out
+waiting for Praxis...
+deployment "praxis" successfully rolled out
+all deployments ready
 
-[track-b] Deploying simulators (sim-a=idle, sim-b=busy)
-[track-b] sim-a ClusterIP: 10.96.X.X (idle:  kv=10%, running=0, waiting=0)
-[track-b] sim-b ClusterIP: 10.96.Y.Y (busy: kv=90%, running=8, waiting=3)
+=== test 1: normal request routing ===
+HTTP status: 200
+PASS: correct model in response
 
-[track-b] Deploying Go EPP (kv-cache scorer + max-score picker)
-[track-b] waiting for EPP to scrape endpoint metrics ...
+=== test 2: repeated requests ===
+  request 1: 200 OK
+  request 2: 200 OK
+  request 3: 200 OK
+PASS: 3 repeated requests succeeded
 
-[track-b] Deploying Praxis
+=== test 3: EPP failure -> 503 -> recovery ===
+HTTP status with EPP down: 503
+PASS: EPP unavailable returns 503
+HTTP status after recovery: 200
+PASS: EPP failure and recovery
 
-[track-b] Pod status
-NAME                      READY   STATUS    IP
-go-epp-...                True    Running   10.244.0.6
-praxis-...                True    Running   10.244.0.7
-sim-a-...                 True    Running   10.244.0.4
-sim-b-...                 True    Running   10.244.0.5
+=== test 4: no unexpected h2 errors ===
+PASS: no unexpected h2 errors
 
-[track-b] Verifying simulator fake-metrics
-[track-b] sim-a kv_cache_usage_perc: 0.1
-[track-b] sim-b kv_cache_usage_perc: 0.9
+=== test 5: image identity ===
+deployed image: praxis-track-b-v2:local
+PASS: correct image deployed
 
-[track-b] Sending requests through Praxis -> Go EPP -> backend
-[track-b]   ✓ all 10 requests returned HTTP 200
-
-[track-b] Verifying Go EPP endpoint selection
-[track-b]   ✓ EPP logs contain model 'track-b-load-aware'
-[track-b]   ✓ EPP logs contain sim-a endpoint '10.96.X.X' (idle)
-[track-b] EPP endpoint selection log:
-[track-b]   ... "Running scorer plugin" ... "plugin":"kv-scorer/kv-cache-utilization-scorer"
-[track-b]   ... "Running picker plugin" ... "plugin":"best-picker/max-score-picker"
-[track-b]   ... "Request handled" ... "endpoint":"10.96.X.X:8000"
-[track-b] EPP selected sim-a (10.96.X.X) 10 times (idle, kv=10%)
-[track-b] EPP selected sim-b (10.96.Y.Y) 0 times (busy, kv=90%)
-[track-b]   ✓ Go EPP preferred the idle backend (sim-a: 10, sim-b: 0)
-
-[track-b] What this demo proved:
-[track-b]   - Go EPP scraped Prometheus /metrics from both backends
-[track-b]   - sim-a reports kv-cache 10% (idle), sim-b reports 90% (busy)
-[track-b]   - Go EPP's kv-cache-utilization-scorer preferred the idle endpoint
-[track-b]   - Praxis called Go EPP and applied the selected endpoint via ctx.upstream
-[track-b]   - No Envoy in the request path
-
-[track-b] 03 complete
+=== all KIND request-routing checks passed ===
+--- cleanup ---
+cluster deleted
 ```
 
-**What this proves:**
-- Go EPP scrapes real Prometheus metrics from both backends
-- The `kv-cache-utilization-scorer` scores `1 - kv_usage`: sim-a (0.9) vs sim-b (0.1)
-- `max-score-picker` selects the highest-scoring (idle) endpoint
-- Praxis calls Go EPP and applies the selected endpoint — no Envoy in the path
-- Claim boundary: Go EPP performs load-aware selection; Praxis carries the decision
+## Claim Boundary
+
+These demo outputs prove the generic full-duplex request-routing lifecycle.
+Complete response-body and response-trailer lifecycle support is deferred to
+FD04. The request body preserves its JSON semantics and arrives once, but
+the path may normalize JSON field order; byte-for-byte preservation is not
+claimed.

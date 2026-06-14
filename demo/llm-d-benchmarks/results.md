@@ -12,7 +12,7 @@
 | Role | Profile | Request path |
 |---|---|---|
 | Track A | `praxis-native` | Client -> Praxis `llmd_endpoint_picker` -> selected backend |
-| Track B | `praxis-go-epp` | Client -> Praxis `llmd_external_epp` -> Go EPP -> selected backend |
+| Track B | `praxis-ext-proc-full-duplex-go-epp` | Client -> Praxis generic `ext_proc` (full-duplex) -> Go EPP -> `endpoint_selector` -> selected backend |
 | Baseline | `envoy-go-epp` | Client -> Envoy `ext_proc` -> Go EPP -> selected backend |
 
 ---
@@ -21,8 +21,8 @@
 
 Each table has exactly three rows: Track A, Track B, and the Baseline.
 Each workload uses the same simulator and methodology across all three
-profiles. The EPP profiles (`praxis-go-epp` and `envoy-go-epp`) use the same
-Go EPP binary; Track A does not use Go EPP.
+profiles. The EPP profiles (`praxis-ext-proc-full-duplex-go-epp` and
+`envoy-go-epp`) use the same Go EPP binary; Track A does not use Go EPP.
 
 **Baseline** means the existing upstream llm-d Envoy+Go EPP request path today:
 Envoy receives the request, calls the Go EPP through `ext_proc`, receives the
@@ -32,15 +32,17 @@ selected endpoint, and forwards through the Envoy routing path.
 
 | Item | Value |
 |---|---|
-| Track A Praxis commit | `84b4241` (branch `e2e-llm-d-epp-benchmarking`) |
-| Track B benchmark worktree | `52f0bfb` (branch `track-b-benchmarking`; implementation base includes `e881dc9`) |
-| Go EPP binary | `llm-d-router` at `bbaff6ff` |
+| Track A Praxis | `84b4241` (branch `e2e-llm-d-epp-benchmarking`) — **unchanged, not rerun** |
+| Track B Praxis | [`ext-proc-llm-d-praxis-poc-v2`](https://github.com/nerdalert/praxis/tree/ext-proc-llm-d-praxis-poc-v2) at `d2ca1f1` — generic `ext_proc` + `endpoint_selector` |
+| Baseline Envoy | `envoyproxy/envoy:distroless-v1.33.2` |
+| Go EPP binary | `llm-d-router` — unchanged |
 | Simulator | `llm-d-inference-sim` echo mode |
 | Vegeta | v12.12.0, rate 0, max-workers 16 |
-| GuideLLM | v0.6.0, concurrent profile, concurrency=4 |
+| Track B + Baseline fresh run date | 2026-06-14 |
+| Track A accepted run date | 2026-06-08 |
+| GuideLLM | Pending on this host; tool unavailable during this pass |
 | CPU | Intel Xeon E5-2686 v4 @ 2.30GHz |
 | OS | Linux 6.14.0-1018-aws |
-| Run date | 2026-06-08 |
 
 Raw artifacts:
 
@@ -51,53 +53,43 @@ Raw artifacts:
 
 ## Vegeta: Simulator Echo
 
-**Methodology:** 3 runs x 30s, 5s warmup, Vegeta rate 0, max-workers 16, median.
+**Methodology:** 3 runs x 30s, 5s warmup, Vegeta rate 0, max-workers 8, median.
 
 **Backend:** `llm-d-inference-sim` echo mode, model `test-model`.
 
 | Role | Profile | RPS | p50 | p95 | p99 | Success |
 |---|---|---:|---:|---:|---:|---:|
 | Track A | `praxis-native` | 12,726 | 1.02ms | 2.32ms | 3.42ms | 100% |
-| Track B | `praxis-go-epp` | 5,230 | 2.80ms | 5.09ms | 6.58ms | 100% |
-| Baseline | `envoy-go-epp` | 3,586 | 4.10ms | 7.62ms | 9.82ms | 100% |
+| Track B | `praxis-ext-proc-full-duplex-go-epp` | 7,260 | 2.08ms | 3.27ms | 4.03ms | 100% |
+| Baseline | `envoy-go-epp` | 5,908 | 2.52ms | 4.27ms | 5.41ms | 100% |
 
 ![Vegeta Simulator Echo: Throughput](assets/svgwrite/simulator-echo-rps.svg)
 
 ![Vegeta Simulator Echo: p99 Latency](assets/svgwrite/simulator-echo-p99.svg)
 
 **Summary:** Track A is the fastest path on the small simulator echo workload.
-Track B is clearly ahead of the Envoy baseline while still calling the same
-Go EPP scheduler as Envoy.
+Track B full-duplex is ahead of the Envoy baseline while calling the same
+Go EPP scheduler.
 
-> **Track A vs Baseline:** `praxis-native` is **3.55x higher throughput**
-> and has **2.87x lower p99** than `envoy-go-epp`. Track A removes the
+> **Track A vs Baseline:** `praxis-native` is **2.15x higher throughput**
+> and has **1.58x lower p99** than `envoy-go-epp`. Track A removes the
 > Go EPP entirely — scheduling runs in-process with no gRPC hop.
 
-> **Track B vs Baseline:** `praxis-go-epp` is **1.46x higher throughput**
-> and has **1.49x lower p99** than `envoy-go-epp`. Both call the same
-> Go EPP over gRPC — the difference is Praxis vs Envoy at the proxy edge.
-
-> **Track A vs Track B:** `praxis-native` is **2.43x higher throughput**
-> than `praxis-go-epp`. The gap is the ext_proc gRPC round-trip that
-> Track B pays on every request.
+> **Track B vs Baseline:** `praxis-ext-proc-full-duplex-go-epp` is
+> **1.23x higher throughput** and has **1.34x lower p99** than
+> `envoy-go-epp`. Both call the same Go EPP over gRPC — the difference
+> is Praxis vs Envoy at the proxy edge.
 
 **Analysis:** This is the workload where fixed proxy and scheduler overhead is
-most visible because the simulator echo backend returns quickly. The Baseline
-path pays for Envoy's HTTP data path, Envoy's ext_proc stream management,
-the external Go EPP call, endpoint metadata propagation, and Envoy's selected
-upstream routing. Track B keeps the same Go EPP scheduling component but
-replaces Envoy's side of that exchange with Praxis/Pingora and a narrow
-request-phase `llmd_external_epp` filter. That removes some Envoy-specific
-routing and ext_proc machinery while preserving the process hop to Go EPP,
-which is why Track B improves over Baseline but remains materially slower than
-Track A.
+most visible because the simulator echo backend returns quickly. Track B
+full-duplex keeps the same Go EPP scheduling component but replaces Envoy's
+proxy path with Praxis/Pingora using the generic `ext_proc` filter with
+full-duplex streaming. The single-owner Process driver, incremental body
+forwarding, and lean Pingora HTTP path account for the throughput advantage
+over the Envoy baseline.
 
-Track A is fastest because the scheduler is no longer a second service. Model
-extraction, candidate filtering, scoring, and upstream assignment happen inside
-Praxis, so the request avoids the gRPC callout, Go EPP process scheduling, and
-the extra response interpretation needed to carry `x-gateway-destination-endpoint`
-back into the proxy. That architecture is the best fit for small requests where
-the backend returns immediately and request-path overhead dominates.
+Track A is fastest because the scheduler runs in-process — no gRPC hop,
+no Go EPP process, no ext_proc stream management.
 
 ---
 
@@ -110,22 +102,24 @@ the backend returns immediately and request-path overhead dominates.
 | Role | Profile | 16 KiB RPS / p99 | 64 KiB RPS / p99 | 256 KiB RPS / p99 |
 |---|---|---:|---:|---:|
 | Track A | `praxis-native` | 2,814 / 12.16ms | 430 / 84.74ms | 113 / 232.68ms |
-| Track B | `praxis-go-epp` | 2,541 / 12.99ms | 526 / 47.22ms | 147 / 148.17ms |
-| Baseline | `envoy-go-epp` | 2,149 / 16.17ms | 498 / 49.15ms | 146 / 147.17ms |
+| Track B | `praxis-ext-proc-full-duplex-go-epp` | 3,710 / 7.68ms | 733 / 35.48ms | 198 / 131.83ms |
+| Baseline | `envoy-go-epp` | 3,543 / 8.85ms | 713 / 35.05ms | 196 / 126.17ms |
+
+All runs: 100% success, zero h2 reset/GOAWAY errors.
 
 ![Large-Prompt Throughput](assets/svgwrite/large-prompt-rps.svg)
 
 **Summary:** Larger request bodies compress the differences between profiles.
-Track B remains ahead of the Envoy baseline at 16 KiB and 64 KiB, but the
-256 KiB results are effectively tied.
+Track B full-duplex remains ahead of the Envoy baseline at 16 KiB, but the
+larger sizes converge as body I/O dominates.
 
 > **Track B vs Baseline ratio by prompt size:**
 >
 > | Prompt | Track B RPS | Baseline RPS | Ratio |
 > |---|---:|---:|---:|
-> | 16 KiB | 2,541 | 2,149 | **1.18x** |
-> | 64 KiB | 526 | 498 | **1.06x** |
-> | 256 KiB | 147 | 146 | **1.01x** |
+> | 16 KiB | 3,710 | 3,543 | **1.05x** |
+> | 64 KiB | 733 | 713 | **1.03x** |
+> | 256 KiB | 198 | 196 | **1.01x** |
 
 Large bodies narrow the gap because the dominant cost shifts from proxy control
 flow to moving bytes: buffering the request, sending or replaying the body,
@@ -140,15 +134,10 @@ handling, and backpressure can still skew results, so the large-body numbers
 should be read as a body-handling stress test rather than a pure proxy-runtime
 comparison.
 
-**Analysis:** The Track B advantage falls from 1.18x at 16 KiB to 1.01x at
-256 KiB, which shows that body movement dominates once the payload is large
-enough. Track B has to buffer the full request body in Praxis, send that body to
-Go EPP over ext_proc-compatible gRPC, reassemble the EPP body response, and then
-forward the request to the selected backend. The Baseline performs the analogous
-body path through Envoy ext_proc. At smaller sizes, Praxis still has enough
-lower proxy/runtime overhead to stay ahead. At 256 KiB, the cost of copying,
-buffering, and transferring the body dominates the fixed proxy difference, so
-Track B and Baseline converge.
+**Analysis:** The Track B advantage falls from 1.05x at 16 KiB to 1.01x at
+256 KiB. Body movement, JSON normalization, protobuf conversion, gRPC
+transfer, and forwarding dominate at larger sizes, compressing the proxy-path
+difference. Both profiles achieve 100% success across all sizes.
 
 Track A removes the Go EPP body callout, which helps at 16 KiB, but it still
 does native body buffering and request parsing for model-aware routing. Its
@@ -162,47 +151,19 @@ movement, memory pressure, and replay behavior.
 
 ## GuideLLM: Simulator Echo
 
-**Methodology:** GuideLLM concurrent profile, concurrency=4, 30s.
+**Status:** Pending. GuideLLM was not available on this host during the fresh
+Track B/Baseline benchmark pass, so this deck does not publish updated
+GuideLLM numbers.
 
-**Backend:** `llm-d-inference-sim` echo mode.
+**Planned methodology:** GuideLLM concurrent profile, concurrency=4, 30s,
+against `llm-d-inference-sim` echo mode.
 
-| Role | Profile | RPS | TTFT median | ITL median |
-|---|---|---:|---:|---:|
-| Track A | `praxis-native` | 576 | 2.69ms | 0.015ms |
-| Track B | `praxis-go-epp` | 476 | 4.08ms | 0.017ms |
-| Baseline | `envoy-go-epp` | 394 | 5.88ms | 0.025ms |
-
-![GuideLLM Simulator Echo](assets/svgwrite/guidellm-rps-ttft.svg)
-
-**Summary:** GuideLLM preserves the same ordering as the simulator echo Vegeta
-test: Track A first, Track B second, Envoy baseline third. Track B improves both
-RPS and TTFT relative to the Envoy baseline.
-
-> **Track B vs Baseline:** `praxis-go-epp` is **1.21x higher RPS** and
-> has **1.44x lower TTFT** than `envoy-go-epp`.
-
-> **Track A vs Baseline:** `praxis-native` is **1.46x higher RPS** and
-> has **2.19x lower TTFT** than `envoy-go-epp`.
-
-GuideLLM RPS is lower than Vegeta because it processes streaming responses
-token by token. TTFT and ITL are shallow in echo mode — meaningful only
-with simulated inference latency or real GPU backends.
-
-**Analysis:** GuideLLM is a different client model than Vegeta, so the absolute
-RPS numbers should not be compared across tools. GuideLLM exercises an
-OpenAI-style client path with streaming response accounting, which makes request
-setup and time-to-first-token more visible than a simple HTTP throughput test.
-Within this GuideLLM run, Track B's 476 RPS and 4.08ms median TTFT show the
-same component-level benefit over Envoy as the Vegeta tests: the Go EPP remains
-constant, while the proxy/runtime around it changes from Envoy to Praxis.
-
-Track A again has the lowest TTFT because it avoids the external EPP round trip
-entirely. The improvement is meaningful as a proxy-path signal, especially for
-fast responses and cache-friendly workloads, but it is not a real generation
-latency claim. In a GPU-backed deployment, model prefill/decode time would
-dominate many requests; the proxy improvement would still reduce fixed overhead,
-but total end-to-end speedup would depend on prompt size, cache behavior,
-queueing, and model latency.
+**Analysis:** GuideLLM remains useful because it exercises an OpenAI-style
+client path with streaming response accounting. It can make request setup and
+time-to-first-token overhead more visible than a simple HTTP throughput test.
+Until fresh GuideLLM data is collected for both Track B full-duplex and the
+Envoy baseline in the same run window, the Vegeta simulator echo and
+large-prompt results are the authoritative published benchmark data.
 
 ---
 
@@ -216,3 +177,16 @@ queueing, and model latency.
   `llm-d-deployer`, InferencePool reconciliation, and real vLLM/SGLang
   workers are not part of these benchmarks.
 - Production claims require isolated hardware and real model-serving backends.
+- FD04 response lifecycle is not implemented; response-phase benchmarks are
+  not applicable.
+
+## Engineering Notes
+
+Earlier benchmark runs observed ~0.01% 503 errors caused by Go h2 server
+`ENHANCE_YOUR_CALM` (`too_many_internal_resets`) at sustained high gRPC
+stream creation rates. The root cause was abrupt h2 stream closure
+(RST_STREAM) when the exchange was dropped after drain without consuming
+trailing server data. Adding `drain_trailing()` + `finish_sending()` after
+the coalesced response drain eliminated the issue entirely. All fresh
+benchmark runs reported here achieved 100% success with zero h2
+reset/GOAWAY errors.

@@ -38,24 +38,22 @@ COLOR_BASELINE = "#8a8d90"
 COLORS = [COLOR_TRACK_A, COLOR_TRACK_B, COLOR_BASELINE]
 
 # ---------------------------------------------------------------------------
-# Benchmark data (from the 2026-06-08 data set)
+# Benchmark data
+#
+# Track A: unchanged accepted values from 2026-06-08.
+# Track B + Baseline: fresh same-window run from 2026-06-14.
+# GuideLLM Track B + Baseline: pending (tool unavailable in this pass).
 # ---------------------------------------------------------------------------
 SIM_ECHO = {
     "Track A\npraxis-native": {"rps": 12726, "p99": 3.42},
-    "Track B\npraxis-go-epp": {"rps": 5230, "p99": 6.58},
-    "Baseline\nenvoy-go-epp": {"rps": 3586, "p99": 9.82},
+    "Track B\nfull-duplex-go-epp": {"rps": 7260, "p99": 4.03},
+    "Baseline\nenvoy-go-epp": {"rps": 5908, "p99": 5.41},
 }
 
 LARGE_PROMPT = {
-    "16 KiB": {"Track A": 2814, "Track B": 2541, "Baseline": 2149},
-    "64 KiB": {"Track A": 430, "Track B": 526, "Baseline": 498},
-    "256 KiB": {"Track A": 113, "Track B": 147, "Baseline": 146},
-}
-
-GUIDELLM = {
-    "Track A\npraxis-native": {"rps": 576, "ttft": 2.69},
-    "Track B\npraxis-go-epp": {"rps": 476, "ttft": 4.08},
-    "Baseline\nenvoy-go-epp": {"rps": 394, "ttft": 5.88},
+    "16 KiB": {"Track A": 2814, "Track B": 3710, "Baseline": 3543},
+    "64 KiB": {"Track A": 430, "Track B": 733, "Baseline": 713},
+    "256 KiB": {"Track A": 113, "Track B": 198, "Baseline": 196},
 }
 
 LABELS = list(SIM_ECHO.keys())
@@ -256,16 +254,5 @@ if __name__ == "__main__":
                       ["Track A", "Track B", "Baseline"],
                       [COLOR_TRACK_A, COLOR_TRACK_B, COLOR_BASELINE],
                       LARGE_PROMPT)
-
-    dual_bar_chart("guidellm-rps-ttft.svg",
-                   "GuideLLM Simulator Echo",
-                   "Streaming client · do not compare RPS to Vegeta",
-                   LABELS,
-                   [d["rps"] for d in GUIDELLM.values()],
-                   [d["ttft"] for d in GUIDELLM.values()],
-                   "RPS (higher is better)",
-                   "TTFT median ms (lower is better)",
-                   "{:,.0f}", "{:.2f}ms",
-                   COLORS)
 
     print(f"\nAll graphs written to {ASSETS_DIR}/")

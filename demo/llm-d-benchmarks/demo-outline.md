@@ -37,9 +37,10 @@ Track B:
 ```text
 Client
   -> Praxis / Pingora
-  -> llmd_external_epp
+  -> generic ext_proc (full-duplex streamed)
   -> Go EPP scheduler
   -> x-gateway-destination-endpoint
+  -> endpoint_selector
   -> llm-d-inference-sim
 ```
 
@@ -57,7 +58,7 @@ Narration:
 | Role | Profile | What it measures |
 |---|---|---|
 | Track A | `praxis-native` | Native llm-d scheduling inside Praxis |
-| Track B | `praxis-go-epp` | Praxis as the proxy while keeping Go EPP |
+| Track B | `praxis-ext-proc-full-duplex-go-epp` | Praxis as the proxy while keeping Go EPP |
 | Baseline | `envoy-go-epp` | Existing upstream llm-d Envoy+Go EPP path |
 
 Narration:
@@ -77,20 +78,20 @@ Narration:
   - Shows how the gap changes as body buffering and transfer dominate.
 - **GuideLLM simulator echo**
   - LLM-shaped client behavior with streaming response accounting.
-  - Reports RPS, TTFT, and ITL in echo mode.
+  - Pending on this host because the tool was unavailable during the fresh run.
 
 ## Result Slide: Vegeta Simulator Echo
 
 | Role | Profile | RPS | p99 |
 |---|---|---:|---:|
 | Track A | `praxis-native` | 12,726 | 3.42ms |
-| Track B | `praxis-go-epp` | 5,230 | 6.58ms |
-| Baseline | `envoy-go-epp` | 3,586 | 9.82ms |
+| Track B | `praxis-ext-proc-full-duplex-go-epp` | 7,260 | 4.03ms |
+| Baseline | `envoy-go-epp` | 5,908 | 5.41ms |
 
 Narration:
 
-- Track B is 1.46x higher throughput than Baseline while still using Go EPP.
-- Track A is 3.55x higher throughput than Baseline because it removes the
+- Track B is 1.23x higher throughput than Baseline while still using Go EPP.
+- Track A is 2.15x higher throughput than Baseline because it removes the
   external scheduler process entirely.
 - This workload is where request-path overhead is easiest to see because the
   backend returns immediately.
@@ -100,8 +101,8 @@ Narration:
 | Role | 16 KiB RPS / p99 | 64 KiB RPS / p99 | 256 KiB RPS / p99 |
 |---|---:|---:|---:|
 | Track A | 2,814 / 12.16ms | 430 / 84.74ms | 113 / 232.68ms |
-| Track B | 2,541 / 12.99ms | 526 / 47.22ms | 147 / 148.17ms |
-| Baseline | 2,149 / 16.17ms | 498 / 49.15ms | 146 / 147.17ms |
+| Track B | 3,710 / 7.68ms | 733 / 35.48ms | 198 / 131.83ms |
+| Baseline | 3,543 / 8.85ms | 713 / 35.05ms | 196 / 126.17ms |
 
 Narration:
 
@@ -112,17 +113,17 @@ Narration:
 
 ## Result Slide: GuideLLM Simulator Echo
 
-| Role | Profile | RPS | TTFT median | ITL median |
-|---|---|---:|---:|---:|
-| Track A | `praxis-native` | 576 | 2.69ms | 0.015ms |
-| Track B | `praxis-go-epp` | 476 | 4.08ms | 0.017ms |
-| Baseline | `envoy-go-epp` | 394 | 5.88ms | 0.025ms |
+GuideLLM is pending for the full-duplex Track B benchmark update because the
+tool was unavailable on this host during the fresh same-window Track B/Baseline
+run.
 
 Narration:
 
-- GuideLLM preserves the same ordering as the small Vegeta run.
-- Track B is 1.21x higher RPS and 1.44x lower TTFT than Baseline.
-- TTFT and ITL are shallow in echo mode; GPU-backed validation is still needed.
+- Do not publish older GuideLLM numbers beside the fresh Vegeta numbers.
+- The authoritative published benchmark data for this pass is Vegeta simulator
+  echo and Vegeta large-prompt body handling.
+- GuideLLM remains useful follow-up validation because it exercises streaming
+  response accounting and TTFT.
 
 ## Claim Boundaries Slide
 

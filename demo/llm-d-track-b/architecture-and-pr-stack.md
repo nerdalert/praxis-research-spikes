@@ -2,257 +2,247 @@
 
 ## Executive Summary
 
-Track B adds an ext_proc-compatible gRPC client to Praxis so it can call the existing Go EPP (Endpoint Picker/Proxy) for inference scheduling. Praxis replaces Envoy at the proxy edge but does not replace the Go EPP scheduler.
+Track B adds a generic full-duplex `ext_proc` gRPC client to Praxis so it
+can call the existing Go EPP (Endpoint Picker/Proxy) for inference
+scheduling. Praxis replaces Envoy at the proxy edge but does not replace the
+Go EPP scheduler.
 
-The implementation is a narrow request-phase-only ext_proc client — not full Envoy ext_proc parity. It proves that Praxis can serve as a drop-in proxy replacement for Envoy in the llm-d request path while keeping the Go EPP scheduling decision intact.
+The implementation uses Envoy's standard `ExternalProcessor.Process`
+bidirectional streaming protocol — not a custom filter. One persistent gRPC
+stream per HTTP request carries request headers and body to the Go EPP. The
+Go EPP makes its scheduling decision at body EOS and returns an endpoint
+header mutation. A separate generic `endpoint_selector` filter reads the
+trusted mutation and sets the upstream.
 
-## Track B Request Path
+This is a request-routing milestone. Response-phase lifecycle (FD04) is
+remaining work.
 
-```text
-Client
-  -> Praxis / Pingora (HTTP listener)
-  -> llmd_external_epp HttpFilter (on_request_body, StreamBuffer mode)
-  -> ext_proc gRPC bidirectional stream to Go EPP
-     -> send ProcessingRequest::RequestHeaders
-     -> send ProcessingRequest::RequestBody (end_of_stream=true)
-     -> read ProcessingResponse::RequestHeaders (with x-gateway-destination-endpoint)
-     -> read ProcessingResponse::RequestBody (streamed chunks, reassembled)
-     -> drain trailing responses (5ms timeout, prevents h2 ENHANCE_YOUR_CALM)
-  -> set ctx.upstream from EPP-selected endpoint
-  -> apply request header mutations
-  -> replace body if EPP mutated it
-  -> FilterAction::Release (forward buffered body to upstream)
-  -> selected inference backend
-```
-
-## What PR #428 Provided
-
-Track B builds on top of Praxis PR #428, which added:
-
-- Header-phase ext_proc tonic client foundations (`callout.rs`, `mutations.rs`)
-- Proto type generation for Envoy ext_proc (`praxis-proto` crate)
-- Request/response header conversion between Praxis `HttpFilterContext` and ext_proc `HttpHeaders`
-- Header mutation application (append, overwrite, remove) with full `HeaderAppendAction` semantics
-- `ExtProcFilter` for header-only ext_proc callouts
-- Unit tests with fake gRPC server
-
-Track B extends PR #428's header-only callout into a full request-phase exchange (headers + body on a single stream) and adds the `llmd_external_epp` filter that integrates it into the Praxis pipeline.
-
-## What Track B Added
-
-### Request-phase stream helper (`request_phase.rs`)
-
-- Opens one `ExternalProcessor.Process` bidirectional gRPC stream
-- Sends `RequestHeaders` then terminal `RequestBody` on the same stream
-- Reads header response, then one or more body responses
-- Handles Go EPP's `StreamedResponse` chunks (62 KB max each), reassembles into contiguous body
-- Fail-closed: incomplete streamed sequences, mixed mutation types, and stream closure before `end_of_stream=true` are errors
-- Drains trailing responses with 5ms timeout to prevent h2 `too_many_internal_resets` under sustained load
-- Extracts `x-gateway-destination-endpoint` from header response mutations (case-insensitive)
-
-### `llmd_external_epp` filter (`llmd_external_epp.rs`)
-
-- Buffers the full request body via `BodyMode::StreamBuffer`
-- Calls `process_request_phase()` at `end_of_stream=true` — exactly one EPP call per request
-- Sets `ctx.upstream` from EPP-selected endpoint (validated: IPv4, DNS, bracketed IPv6, port 1-65535)
-- Applies request header mutations from EPP response
-- Replaces body if EPP mutated it (content-length repaired by protocol layer)
-- All EPP errors return `FilterAction::Reject(status_on_error)` — always fail-closed, even if pipeline `failure_mode` is open
-- `ImmediateResponse` from EPP preserves EPP's status and body
-- Lazy tonic channel via `tokio::sync::OnceCell` (deferred from `from_config` to first request)
-
-### StreamBuffer pre-read mutation preservation (`protocol` crate)
-
-- `PreReadMutations` struct carries `request_headers_to_remove`, `request_headers_to_set`, and `extra_request_headers` from body-phase filters through StreamBuffer pre-read
-- Without this fix, PR #428's `OverwriteIfExistsOrAdd` and removal mutations were silently dropped during body pre-read
-
-### Server registration
-
-- `build_default_registry()` adds `ext_proc` and `llmd_external_epp` when the `ext-proc` Cargo feature is enabled
-- CLI validation (`--validate`, `--dump`) wrapped in a temporary tokio runtime for tonic `connect_lazy` compatibility
-- Registration failures call `fatal()` (process exit) — invariant failure, matching existing Praxis convention
-
-## Local Process Demo Architecture
+## Request Path
 
 ```text
-                    ┌─────────────┐
-                    │   Client    │
-                    │  (curl/     │
-                    │   vegeta)   │
-                    └──────┬──────┘
-                           │ HTTP POST /v1/chat/completions
-                    ┌──────▼──────┐
-                    │   Praxis    │ :18090 (or :18091 for smoke)
-                    │ llmd_ext_epp│
-                    └──────┬──────┘
-                           │ ext_proc gRPC (tonic)
-                    ┌──────▼──────┐
-                    │   Go EPP    │ :9002 gRPC
-                    │ file disc.  │
-                    └──────┬──────┘
-                           │ x-gateway-destination-endpoint
-                    ┌──────▼──────┐
-                    │  Simulator  │ :18080
-                    │ (or mock)   │
-                    └─────────────┘
+Client HTTP request
+  |
+  v
+Praxis / Pingora HTTP listener
+  |
+  v
+ext_proc filter (full_duplex_streamed mode)
+  |-- open(): construct Process future + preload RequestHeaders
+  |-- on_request_body(): send body chunks via select!-driven bootstrap
+  |-- on_request_body(EOS): send terminal body, drain responses
+  |-- receive(): resolve pending Process future, read header/body responses
+  |-- apply mutations to filter context
+  |
+  v
+endpoint_selector filter (required: true, strip_header: true)
+  |-- resolve x-gateway-destination-endpoint from trusted mutation log
+  |-- reject if absent (fail-closed, HTTP 503)
+  |-- set ctx.upstream
+  |-- strip routing header from session, snapshot, and provenance
+  |
+  v
+Pingora upstream_peer
+  |-- convert ctx.upstream to HttpPeer
+  |
+  v
+Selected inference backend
 ```
 
-The local request-path demo (`e2e/local-go-epp/run-01-request-path.sh`) starts all three processes, sends a request with a unique per-run model name, and verifies:
-- HTTP 200 with correct model in response and EPP log
-- HTTP 413 for oversized body (EPP log proves no EPP call)
-- HTTP 503 when EPP is stopped
+## Component Responsibilities
 
-## KIND Demo Architecture (Load-Aware Routing)
+| Component | Responsibility |
+|-----------|---------------|
+| `ext_proc` filter | Generic Envoy ext_proc gRPC client. Opens one Process stream per request. Sends headers and body incrementally. Drains responses at EOS. Applies header/body mutations and structured metadata. |
+| `ExtProcExchange` | Single-owner duplex exchange state machine. Validates send/receive ordering, manages timeouts, classifies response events. No background tasks. |
+| `SyncWrapper<PinnedProcessFuture>` | Wraps the pending tonic Process future for Sync compatibility. Polled inline from send() via select!, resolved by receive(). |
+| `endpoint_selector` filter | Reads a configured header from trusted pre-read mutations. Validates host:port. Sets ctx.upstream. Strips the internal header. Configurable required mode with exact failure status. |
+| `TrustedHeaderMutation` | Ordered mutation log preserving pre-read remove/set/add operations. Resolved by endpoint_selector without consulting original client headers. |
+| Go EPP | Unchanged external process. Receives ext_proc requests, runs scheduling (discovery, scoring, selection), returns endpoint via header mutation. |
+
+## Single-Owner Process Stream Lifecycle
 
 ```text
-                    ┌─────────────┐
-                    │   Client    │
-                    │  (curl)     │
-                    └──────┬──────┘
-                           │ NodePort :30092
-                    ┌──────▼──────┐
-                    │   Praxis    │ Deployment + NodePort Service
-                    │ llmd_ext_epp│
-                    └──────┬──────┘
-                           │ ClusterIP Service :9002
-                    ┌──────▼──────┐
-                    │   Go EPP    │ Deployment + ClusterIP Service
-                    │ kv-scorer + │ (file discovery, metrics scraping)
-                    │ max-picker  │
-                    └──────┬──────┘
-                      ┌────┴────┐
-               ┌──────▼──┐  ┌──▼──────┐
-               │  sim-a   │  │  sim-b   │
-               │ idle     │  │ busy     │
-               │ kv=10%   │  │ kv=90%   │
-               └──────────┘  └──────────┘
+open()
+  |-- create capacity-1 mpsc channel
+  |-- preload first ProcessingRequest (headers + protocol config) via try_send
+  |-- construct pinned Process future (owns client + ReceiverStream)
+  |-- wrap in SyncWrapper for Sync bound
+  |-- store as BootstrapState::Pending
+  |-- return exchange (synchronous, no await)
+
+send(body_chunk)
+  |-- validate state transition
+  |-- reserve_while_bootstrapping:
+  |     select! {
+  |       tx.reserve() => return permit (preserve Pending)
+  |       pending_future => store Ready(response_stream), continue reserve
+  |     }
+  |-- commit message via permit.send()
+  |-- update phase and deadline atomically
+
+receive()
+  |-- ensure_response_stream: await Pending future if not yet Ready
+  |-- read from Ready stream
+  |-- classify response event (headers, body, immediate, etc.)
+  |-- validate processor output ordering
+
+drain_complete
+  |-- finish_sending: half-close request channel
+  |-- drain_trailing: consume remaining server responses until EOF
+  |-- clean h2 stream close (no RST_STREAM)
+
+drop
+  |-- drops SyncWrapper(pending future) or Ready(stream)
+  |-- drops tx (closes request channel)
+  |-- no detached task remains
 ```
 
-The Kubernetes load-aware routing demo deploys two simulator backends with asymmetric fake-metrics. The Go EPP uses the `kv-cache-utilization-scorer` and `max-score-picker` to route requests to the idle backend. It verifies:
-- Both simulators report distinct KV cache utilization (10% vs 90%)
-- All requests return HTTP 200
-- Go EPP logs show the idle endpoint was selected
-- Simulator pod logs confirm the idle backend received the requests
+## How ext_proc and endpoint_selector Compose
 
-## What Is Proven
+1. During StreamBuffer pre-read, the `ext_proc` filter sends request headers
+   and body chunks to the Go EPP through the Process stream.
 
-- Praxis calls the real Go EPP through ext_proc-compatible gRPC
-- Go EPP file discovery works without modification
-- Go EPP streamed body response chunks are correctly reassembled
-- `ctx.upstream` set during body pre-read is honored by Pingora for upstream connection
-- Request header mutations (append, overwrite, remove) survive StreamBuffer pre-read
-- Content-Length is repaired by the protocol layer after body mutation
-- Lazy tonic channel reconnects after EPP restart
-- h2 stream drain prevents connection-level errors under sustained load
-- The complete path works in both local-process and KIND Kubernetes deployments
+2. The Go EPP buffers the request, makes its scheduling decision at body
+   EOS, and responds with a `HeaderMutation` containing
+   `x-gateway-destination-endpoint: host:port`.
 
-## What Is Not Proven
+3. The `ext_proc` filter applies the mutation to the filter context's
+   `extra_request_headers`. The protocol layer captures these as
+   `TrustedHeaderMutation::Add` operations in the ordered pre-read mutation
+   log.
 
-- Response-phase ext_proc (not implemented)
-- Full Envoy ext_proc parity (request-phase only, narrow scope)
-- True Envoy append header semantics (overwrite semantics work for Go EPP but deviate from spec)
-- Client-disconnect cancellation propagation (timeout cancellation is tested)
-- Kubernetes-only EPP plugins (`InferenceModelRewrite`, `InferenceObjective`)
-- GPU-backed inference or real scheduling quality
-- Production TLS/mTLS, service mesh, or auth integration
+4. After pre-read, the normal request pipeline runs. The `endpoint_selector`
+   filter resolves `x-gateway-destination-endpoint` from the trusted
+   mutation log — never from original client headers.
 
-## Risks and Deferred Work
+5. The selector validates the endpoint, sets `ctx.upstream`, and strips the
+   internal routing header from pending mutations, session headers, request
+   snapshot, and pre-read provenance.
 
-| Risk | Status | Impact |
-|---|---|---|
-| Overwrite-vs-append header semantics | Known deviation | Works for Go EPP; would break processors relying on true multi-value append |
-| Go EPP plugins requiring K8s state | Not tested | File discovery proves the handoff; full K8s plugins may need additional data |
-| Response-phase ext_proc | Not implemented | Some processors expect response-phase callbacks |
-| h2 connection sharing under extreme load | Mitigated by drain | The 5ms drain timeout is a pragmatic bound, not a protocol guarantee |
-| Endpoint validation edge cases | DNS labels validated | Malformed but syntactically valid hostnames could reach upstream |
+6. Pingora's `upstream_peer` converts `ctx.upstream` to an `HttpPeer` and
+   forwards the request.
 
-## Upstream PR Breakdown
+## How This Differs from Envoy ext_proc
 
-### PR-core-1: Pre-read body mutation plumbing
+| Aspect | Envoy | Praxis Track B |
+|--------|-------|---------------|
+| Filter | Built-in ext_proc filter | Generic `ext_proc` filter (opt-in feature) |
+| Stream | Per-phase callouts or bidirectional | One full-duplex bidirectional stream per request |
+| Body mode | Buffered, streamed, or none | Full-duplex streamed (concurrent send/receive) |
+| Endpoint selection | ORIGINAL_DST cluster | `endpoint_selector` filter with trusted mutation provenance |
+| Bootstrap | Awaits process() response | Single-owner pending future, polled inline |
+| Response phase | Full response lifecycle | Request-only (FD04 remaining) |
 
-**Scope**: Praxis core prerequisite — does not depend on ext-proc or llm-d.
+## Historical Context: llmd_external_epp
 
-- `PreReadMutations` struct in `stream_buffer.rs`
-- `apply_pre_read_mutations_to_request` / `_to_session` in `mod.rs`
-- Collects `request_headers_to_remove`, `request_headers_to_set`, and `extra_request_headers` from body-phase filters through StreamBuffer pre-read
-- Applies in order: remove, set, extra
-- 6 protocol tests proving remove/set/extra/ordering/noop behavior
+The earlier Track B prototype used a custom `llmd_external_epp` filter. It
+buffered the entire request body, sent headers and body in one synchronous
+exchange, and extracted the endpoint directly. This approach was replaced by
+the generic `ext_proc` filter with full-duplex streaming, which enables
+incremental body forwarding, single-owner exchange state, and composition
+with the generic `endpoint_selector` for trusted upstream selection.
 
-### PR-B01: ext_proc request-phase client foundation
+## Implementation Branch
 
-**Scope**: `filter/ext-proc/src/request_phase.rs` and related test infrastructure.
+The current implementation is on the
+[ext_proc Praxis/llm-d POC branch](https://github.com/nerdalert/praxis/tree/ext-proc-llm-d-praxis-poc-v2)
+at commit `d2ca1f1`.
 
-- `process_request_phase()`: opens one `ExternalProcessor.Process` stream, sends headers + body, reads responses
-- `RequestPhaseResult` and `RequestPhaseError` types
-- Go EPP `StreamedResponse` chunk handling with reassembly
-- Fail-closed: `IncompleteBodyStream` error for incomplete/mixed sequences
-- `drain_stream()` with 5ms timeout preventing h2 `ENHANCE_YOUR_CALM`
-- `response_variant_name` visibility change in `callout.rs`
-- Fake EPP mock with `AtomicUsize` call counter
-- `CancellationObserverMock` / `ResponseCancellationMock` for stream lifecycle tests
+## Base: Praxis PR #428
 
-### PR-B02: `llmd_external_epp` filter
+All Track B full-duplex work builds on PR #428, which added:
 
-**Scope**: `filter/ext-proc/src/llmd_external_epp.rs` and filter tests.
+- Header-phase ext_proc tonic client foundations
+- Proto type generation for Envoy ext_proc
+- Request/response header conversion
+- Header mutation application with full `HeaderAppendAction` semantics
+- `ExtProcFilter` for header-only callouts
+- Unit tests with mock gRPC server
 
-- Filter config: `target`, `request_timeout_ms`, `max_request_body_bytes`, `status_on_error`
-- `BodyAccess::ReadWrite`, `BodyMode::StreamBuffer { max_bytes }`
-- Calls `process_request_phase()` at `end_of_stream=true`
-- Extracts and validates `x-gateway-destination-endpoint` (IPv4, DNS, bracketed IPv6, port 1-65535)
-- Sets `ctx.upstream` from EPP-selected endpoint
-- Applies header mutations, replaces body if mutated
-- All EPP errors → `FilterAction::Reject(status_on_error)` (not `FilterError`)
-- `ImmediateResponse` preserves EPP status
-- Lazy tonic channel via `OnceCell<Channel>`
-- `praxis-core` dependency for `Upstream` / `ConnectionOptions`
-- Config, capability, integration, validation, and cardinality tests
+PR #428 is the assumed base, not one of the three full-duplex PRs.
 
-### PR-B03: Server registration and validation
+## Full-Duplex Implementation PRs
 
-**Scope**: `server/` crate changes.
+### PR 1: Request-Scoped Filter State and Pipeline Pinning
 
-- `build_default_registry()`: extends `FilterRegistry::with_builtins()` with `ext_proc` and `llmd_external_epp` when `--features ext-proc`
-- `register_ext_proc_filters()`: `fatal()` on duplicate (invariant failure)
-- `praxis-ext-proc` optional dependency gated on `ext-proc` feature
-- `commands.rs`: tokio runtime wrapper for CLI validation (`connect_lazy` compatibility)
-- Registration tests: registry contains filters, valid/invalid config validation through production `validate_config_for_startup` path
+**Status:** Accepted
 
-### PR-B04: Failure modes and hardening
+**Scope:**
+- Per-request typed filter state keyed by stable filter invocation ID
+- Pipeline pinning to survive hot configuration reload mid-request
+- Filter identity for branch chains
+- Set-before/clear-after lifecycle for `current_filter_id`
 
-**Scope**: Tests and documentation proving fail-closed behavior.
+**Why it matters:**
+The duplex exchange must persist across `on_request` and `on_request_body`
+hooks. Per-filter state provides type-safe storage without global maps or
+Arc<Mutex>. Pipeline pinning ensures the same filter instance handles both
+hooks even during live config reload.
 
-- EPP call cardinality: zero before EOS, exactly one at EOS, no retry after timeout/error
-- Server-observed response-stream cancellation on timeout (`tx.closed()`)
-- `failure_mode: open` pipeline test: `Reject` survives open mode
-- Endpoint validation: `[not-ipv6]:8080`, `bad/host:8080`, DNS label rules, RFC 952/1123 length limits
-- Example config: `examples/configs/ai/llmd-external-epp.yaml`
-- Production validation tests via `commands::validate_config_for_startup`
+**Evidence:** 15 focused unit tests, hot-reload lifecycle tests, branch
+identity tests.
 
-### PR-B05: Local and KIND e2e smoke harness
+### PR 2: Single-Owner Duplex Exchange Core
 
-**Scope**: `e2e/` directory (not upstreamed to Praxis).
+**Status:** Accepted
 
-- `e2e/local-go-epp/`: local-process smoke with process-owned readiness, unique model verification, 413 no-EPP-call proof, exact 503
-- `e2e/kind-go-epp/`: KIND deployment with `Containerfile.praxis-track-b`, manifests, simulator ClusterIP patching, EPP `--v=3` for endpoint logging, recovery pod verification
-- Dedicated cluster policy, bounded cleanup, image evidence
+**Scope:**
+- `ExtProcExchange` with six orthogonal state domains
+- Transactional send: validate → reserve → commit → update (no await
+  between commit steps)
+- Typed response classification with processor-output ordering validation
+- Per-message timeout with processor-requested override support
+- Capacity-1 bounded request channel
+- Direction-independent send/receive phase tracking
+- `SyncWrapper<PinnedProcessFuture>` bootstrap state
+- `BootstrapState::Pending` / `Ready` / `Closed` lifecycle
 
-### PR-B06: Benchmark branch (not upstream implementation)
+**Why it matters:**
+The Go EPP requires a persistent bidirectional stream — not one-shot
+callouts. The exchange owns one Process invocation with no spawned tasks,
+enforces protocol ordering, and provides bounded backpressure through the
+capacity-1 channel.
 
-**Scope**: `track-b-benchmarking` branch only. Not part of the upstream implementation PRs.
+**Evidence:** 80+ duplex exchange tests covering state transitions, timeout
+behavior, override handling, cancellation, concurrent exchanges, and
+Send+Sync compile-time assertions.
 
-- Separate Praxis copy at `praxis-track-b-benchmarking/`
-- `run-same-backend-benchmark.sh`: 3-profile Go mock comparison
-- `run-track-b-sim-benchmark.sh`: 3-profile simulator echo
-- `run-track-b-large-prompt.sh`: body-size scaling (16K/64K/256K)
-- `run-track-b-guidellm-sim.sh`: GuideLLM concurrent profile
-- Go mock backend for 100% success under open-loop load
-- h2 drain fix backported from benchmark worktree to implementation tree
-- Results feed `demo/llm-d-benchmarks/results.md`
+### PR 3: Generic Full-Duplex Request-Routing Integration
 
-### PR-B07: Public demo docs
+**Status:** Accepted (request routing)
 
-**Scope**: `demo/llm-d-track-b/` in the research spikes repo.
+**Scope:**
+- Full-duplex `request_body_mode: full_duplex_streamed` config and validation
+- First-message preload for Go EPP compatibility
+- `ensure_exchange_and_send_headers()` idempotent bootstrap
+- Coalesced EOS drain with bounded lifecycle timeout
+- `endpoint_selector` filter with trusted mutation provenance
+- `TrustedHeaderMutation` ordered log (remove/set/add)
+- `resolve_trusted_header()` with ambiguity rejection
+- Configurable `status_on_required_failure` (default 500, Track B uses 503)
+- Fail-closed via `Reject` (not `Err`), immune to `failure_mode: open`
+- Routing header stripping from session, snapshot, and provenance
+- Pre-read mutation preservation with `std::mem::take` (no deep clones)
+- `Set` stores raw `HeaderValue` to preserve non-text bytes
+- Server binary ext_proc feature registration
+- Lazy runtime-local gRPC channel initialization
 
-- Track B demo README
-- Architecture and PR breakdown (this document)
-- Claim boundaries
+**Why it matters:**
+This PR connects the exchange core to the Praxis filter pipeline and the
+unchanged Go EPP. It proves the full request-routing path: pre-read body
+processing, EPP communication, trusted endpoint selection, and upstream
+forwarding — all without a custom filter or legacy compatibility layer.
+
+**Evidence:** 100+ integration tests, 8-assertion local smoke, 5-assertion
+KIND deployment, two clean-start smoke runs.
+
+**Remaining work:** FD04 response-body and response-trailer lifecycle.
+
+## Remaining Work
+
+| Item | Scope |
+|------|-------|
+| FD04A | Async multi-output response body foundation |
+| FD04B | Complete response lifecycle integration |
+| Request trailers | Blocked on Pingora platform boundary |
+| Full Envoy ext_proc parity | Response phases, mode overrides, mutation rules |

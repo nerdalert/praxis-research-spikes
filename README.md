@@ -4,13 +4,15 @@ This repository collects research spikes and implementation demos for Praxis.
 
 ## llm-d Integration PoC
 
-### Praxis proxy with Go EPP
+### Track B: Praxis generic ext_proc with Go EPP
+
+Track B is the `praxis-ext-proc-full-duplex-go-epp` path.
 
 Request path:
 
-`Client -> Praxis llmd_external_epp -> Go EPP -> selected backend`
+`Client -> Praxis ext_proc -> Go EPP -> endpoint_selector -> selected backend`
 
-Praxis replaces Envoy as the proxy/runtime, but the existing Go EPP remains the scheduling brain. Praxis buffers the request body, sends an Envoy ext_proc-compatible request-phase call to Go EPP, reads the selected endpoint from the EPP response, sets the Praxis upstream, and forwards the original request to the selected backend.
+In Track B, Praxis replaces Envoy as the proxy/runtime, but the existing Go EPP remains the scheduling brain. Praxis uses the generic Envoy-compatible `ext_proc` filter with one full-duplex `ExternalProcessor.Process` stream per HTTP request. The Go EPP returns the selected endpoint as a trusted header mutation, and the generic `endpoint_selector` filter sets the Praxis upstream.
 
 This does **not** eliminate Go EPP. It answers: "What happens if Praxis replaces Envoy while keeping the existing Go EPP scheduler?"
 
@@ -24,29 +26,27 @@ Request path:
 
 This is the current comparison path. Envoy receives the client request, calls Go EPP through Envoy `ext_proc`, applies the selected destination, and forwards to the backend. It answers: "What does the current Envoy plus Go EPP architecture cost?"
 
-### Control: generic Praxis proxy
-
-The control profile is `praxis-simple`.
-
-Request path:
-
-`Client -> Praxis generic proxy -> backend`
-
-This is not an llm-d scheduler. It is the generic Praxis forwarding baseline used to estimate base Praxis proxy overhead for the same request shape.
-
 ## llm-d
 
 ### Implementation Demos
 
-### [Praxis with Go EPP](demo/llm-d-track-b/)
+### [Track B: Praxis Full-Duplex ext_proc with Go EPP](demo/llm-d-track-b/)
 
-Praxis replaces Envoy, but keeps the existing Go EPP scheduler through `llmd_external_epp`. Validates ext_proc-compatible gRPC callout, streamed body handling, endpoint selection, fail-closed behavior, local smoke, and KIND deployment.
+Praxis keeps the existing Go EPP scheduler through the generic `ext_proc`
+filter and one full-duplex `ExternalProcessor.Process` stream. Validates local
+and KIND request routing, endpoint-header security and stripping, semantic body
+preservation without duplication, one Process invocation per request, failure,
+and recovery. This is the only Track B implementation path currently being
+refined; benchmark material is context for data-plane performance tradeoffs.
 
 ### Benchmark Results
 
 ### [llm-d Performance Benchmarks](demo/llm-d-benchmarks/)
 
-Consolidated benchmark suite comparing Track A `praxis-native`, Track B `praxis-go-epp`, generic `praxis-simple`, and the current `envoy-go-epp` baseline. Includes Vegeta throughput/latency, GuideLLM TTFT/ITL/token metrics, large-prompt body handling, and simulator echo results.
+Consolidated benchmark suite comparing Track A `praxis-native`, Track B
+`praxis-ext-proc-full-duplex-go-epp`, and the current `envoy-go-epp`
+baseline. Includes Vegeta throughput/latency, large-prompt body handling,
+and simulator echo results. GuideLLM is pending on this host.
 
 ## Other Demos
 
