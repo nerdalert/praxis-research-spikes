@@ -138,8 +138,10 @@ bash scripts/kind-request-routing/run-request-routing.sh
 
 ## What Track B Does Not Prove
 
-- Not full Envoy ext_proc parity — request-phase only; response-phase
-  lifecycle (FD04) is remaining work.
+- Not full Envoy `ext_proc` parity yet. This milestone proves the llm-d
+  request-routing path: request headers, request body, Go EPP endpoint
+  selection, trusted mutation handling, and upstream forwarding. Full
+  response-phase lifecycle support is FD04 follow-up work.
 - Not native in-process endpoint picking — that is Track A.
 - Not removal of the external Go EPP process.
 - Not full Gateway API provider support.

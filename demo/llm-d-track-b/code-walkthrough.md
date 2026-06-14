@@ -30,8 +30,9 @@ generic filters:
 - `endpoint_selector`: reads the trusted
   `x-gateway-destination-endpoint` mutation and sets `ctx.upstream`.
 
-Response lifecycle support is future FD04 work. The accepted milestone proves
-request routing through the unchanged Go EPP.
+This milestone proves the llm-d request-routing path: request headers, request
+body, Go EPP endpoint selection, trusted mutation handling, and upstream
+forwarding. Full response-phase lifecycle support is FD04 follow-up work.
 
 ```text
 Client
@@ -360,9 +361,9 @@ This walkthrough describes the accepted request-routing milestone.
 
 Not included yet:
 
-- FD04 response lifecycle.
+- Full Envoy `ext_proc` parity. This milestone proves request routing through
+  Go EPP; full response-phase lifecycle support is FD04 follow-up work.
 - Request trailers, blocked by a Pingora platform boundary.
-- Full Envoy ext_proc parity.
 - Native in-process scheduling; that is Track A.
 - Removing the Go EPP.
 
