@@ -64,27 +64,12 @@ Client
   -> selected backend
 ```
 
-### Track A (Praxis Native — for contrast)
-
-```
-Client
-  -> Praxis (llmd_endpoint_picker filter)
-      - model extraction, endpoint scoring, upstream selection
-      - no Envoy, no ext_proc, no Go EPP
-  -> selected backend
-```
-
-## Track A vs Track B
-
-| | Track A | Track B |
-|---|---|---|
-| **What Praxis does** | Parses model, scores endpoints, selects upstream | Calls Go EPP via ext_proc, applies EPP's endpoint selection |
-| **What runs scheduling** | Praxis `llmd_endpoint_picker` (in-process) | Go EPP (external process) |
-| **Envoy in path** | No | No |
-| **Go EPP in path** | No | Yes |
-| **What the demo proves** | Praxis-owned scheduling features | Praxis carries the Go EPP scheduling decision without Envoy |
-
 ## Filter Configuration
+
+The `processing_mode` block uses Envoy `ext_proc` concepts. It is explicit
+because Praxis `ext_proc` is a generic filter: other deployments can choose
+different modes, but this llm-d Track B composition needs request headers and a
+full-duplex request body stream.
 
 ```yaml
 filters:
@@ -106,6 +91,17 @@ filters:
     status_on_required_failure: 503
     strip_header: true
 ```
+
+For this demo:
+
+| Field | Why it is set this way |
+|---|---|
+| `request_header_mode: send` | Required so the Go EPP sees the request metadata and OpenAI-compatible headers. |
+| `request_body_mode: full_duplex_streamed` | Required because the Go EPP selects the backend after receiving request body EOS on the same `ExternalProcessor.Process` stream. |
+| `response_header_mode: skip` | Response headers are not needed for the current llm-d request-routing path. |
+| `response_body_mode: none` | Response body processing is broader response-lifecycle parity work, not needed for request routing. |
+| `request_trailer_mode: skip` | Request trailers are not used by this Go EPP routing path. |
+| `response_trailer_mode: skip` | Response trailers are not used by this request-routing milestone. |
 
 ## Demo Matrix
 
@@ -142,7 +138,7 @@ bash scripts/kind-request-routing/run-request-routing.sh
   request-routing path: request headers, request body, Go EPP endpoint
   selection, trusted mutation handling, and upstream forwarding. Full
   response-phase lifecycle support is FD04 follow-up work.
-- Not native in-process endpoint picking — that is Track A.
+- Not native in-process endpoint picking.
 - Not removal of the external Go EPP process.
 - Not full Gateway API provider support.
 - Not production GPU inference performance.

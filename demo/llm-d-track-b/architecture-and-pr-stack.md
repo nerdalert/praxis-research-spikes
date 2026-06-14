@@ -14,8 +14,15 @@ Go EPP makes its scheduling decision at body EOS and returns an endpoint
 header mutation. A separate generic `endpoint_selector` filter reads the
 trusted mutation and sets the upstream.
 
-This is a request-routing milestone. Response-phase lifecycle (FD04) is
-remaining work.
+This is a request-routing milestone. The llm-d Go EPP scheduling decision
+happens on the request path at body EOS, so response-phase lifecycle support
+is not required for this milestone.
+
+## Implementation Branch
+
+The current implementation is on the
+[ext_proc Praxis/llm-d POC branch](https://github.com/nerdalert/praxis/tree/ext-proc-llm-d-praxis-poc-v2)
+at commit `d2ca1f1`.
 
 ## Request Path
 
@@ -97,7 +104,7 @@ drop
   |-- no detached task remains
 ```
 
-## How ext_proc and endpoint_selector Compose
+## Request-Routing Flow: ext_proc to endpoint_selector
 
 1. During StreamBuffer pre-read, the `ext_proc` filter sends request headers
    and body chunks to the Go EPP through the Process stream.
@@ -131,22 +138,7 @@ drop
 | Body mode | Buffered, streamed, or none | Full-duplex streamed (concurrent send/receive) |
 | Endpoint selection | ORIGINAL_DST cluster | `endpoint_selector` filter with trusted mutation provenance |
 | Bootstrap | Awaits process() response | Single-owner pending future, polled inline |
-| Response phase | Full response lifecycle | Request-only (FD04 remaining) |
-
-## Historical Context: llmd_external_epp
-
-The earlier Track B prototype used a custom `llmd_external_epp` filter. It
-buffered the entire request body, sent headers and body in one synchronous
-exchange, and extracted the endpoint directly. This approach was replaced by
-the generic `ext_proc` filter with full-duplex streaming, which enables
-incremental body forwarding, single-owner exchange state, and composition
-with the generic `endpoint_selector` for trusted upstream selection.
-
-## Implementation Branch
-
-The current implementation is on the
-[ext_proc Praxis/llm-d POC branch](https://github.com/nerdalert/praxis/tree/ext-proc-llm-d-praxis-poc-v2)
-at commit `d2ca1f1`.
+| Response phase | Full response lifecycle | Not needed for llm-d request routing; FD04 follow-up for broader parity |
 
 ## Base: Praxis PR #428
 
@@ -236,13 +228,18 @@ forwarding — all without a custom filter or legacy compatibility layer.
 **Evidence:** 100+ integration tests, 8-assertion local smoke, 5-assertion
 KIND deployment, two clean-start smoke runs.
 
-**Remaining work:** FD04 response-body and response-trailer lifecycle.
+**Remaining work:** Broader `ext_proc` parity, especially response lifecycle,
+is future work. It is not a blocker for the accepted llm-d request-routing
+path.
 
-## Remaining Work
+## Non-Blocking Follow-Up Work
 
-| Item | Scope |
-|------|-------|
-| FD04A | Async multi-output response body foundation |
-| FD04B | Complete response lifecycle integration |
-| Request trailers | Blocked on Pingora platform boundary |
-| Full Envoy ext_proc parity | Response phases, mode overrides, mutation rules |
+These items are useful for broader Envoy `ext_proc` parity and future llm-d
+features, but they are not required for the llm-d request-routing path proven here.
+
+| Item | Needed for current llm-d request routing? | Scope |
+|------|---|-------|
+| FD04A | No | Async multi-output response body foundation for future response lifecycle work. |
+| FD04B | No | Complete response lifecycle integration for response metadata, response body processing, usage/eviction-style flows, and broader parity. |
+| Request trailers | No | Blocked on a Pingora platform boundary; not used by the current Go EPP request-routing path. |
+| Full Envoy `ext_proc` parity | No | Broader compatibility work such as response phases, mode overrides, and full mutation-rule coverage. |
