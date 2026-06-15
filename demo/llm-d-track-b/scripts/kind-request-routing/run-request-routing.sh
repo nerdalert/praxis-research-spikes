@@ -4,7 +4,7 @@
 # with unchanged Go EPP and inference simulator.
 #
 # Run from the praxis-research-spikes repository:
-#   bash demo/llm-d-track-b-full-duplex/kind-go-epp-full-duplex/run-request-routing.sh
+#   bash demo/llm-d-track-b/scripts/kind-request-routing/run-request-routing.sh
 #
 # Environment:
 #   TRACK_B_DIR=...          Override the Track B workspace root.

@@ -20,15 +20,27 @@ returns that backend address as a header mutation. Praxis trusts that processor
 mutation, strips the internal routing header, and forwards the request to the
 selected backend.
 
+The important concurrency point is that request sending and processor response
+handling are not serialized into a one-message-at-a-time exchange. Praxis can
+send request headers, stream request body chunks, and send body EOS while the Go
+EPP is still waiting to make its endpoint decision. That is what makes
+`full_duplex_streamed` necessary for the current Go EPP path.
+
 **Technical summary:**
 
-Track B is not a custom llm-d filter anymore. The current path composes two
-generic filters:
+Track B composes two generic Praxis filters:
 
 - `ext_proc`: owns one full-duplex `ExternalProcessor.Process` stream per HTTP
   request.
 - `endpoint_selector`: reads the trusted
   `x-gateway-destination-endpoint` mutation and sets `ctx.upstream`.
+
+The full-duplex implementation is a concurrency feature as much as a protocol
+feature. `ExtProcExchange` owns one bidirectional gRPC stream and lets the
+request path make send-side progress independently from receive-side progress.
+It does this without a per-request worker task: the pending tonic `Process`
+future, bounded outbound channel, send phases, output phases, and timeout state
+are all owned by one request-scoped state machine.
 
 This milestone proves the llm-d request-routing path: request headers, request
 body, Go EPP endpoint selection, trusted mutation handling, and upstream
@@ -54,6 +66,12 @@ Selected inference backend
 ```
 
 ## Code Map
+
+**Summary:**
+
+Track B is implemented across the ext_proc filter/transport, request-scoped
+filter state, trusted-header routing, Pingora lifecycle glue, and the local/KIND
+smoke harnesses.
 
 Important implementation files in the Praxis branch:
 
@@ -213,7 +231,10 @@ routing.
 
 `ExtProcExchange` is the one live conversation with the Go EPP for a request. It
 owns the gRPC stream, sends messages in order, reads replies, and makes sure
-Praxis does not consume replies in the wrong phase.
+Praxis does not consume replies in the wrong phase. It is also the concurrency
+boundary for full-duplex `ext_proc`: send-side body streaming can continue while
+receive-side processor output is deferred, but both sides are coordinated by one
+single-owner state machine.
 
 **Technical walkthrough:**
 
@@ -261,6 +282,44 @@ itself. The critical path is how Praxis drives a bidirectional gRPC stream
 without turning every request into a mini actor system. The accepted design keeps
 the stream single-owner, bounded, and locally driven from the request's filter
 callbacks.
+
+**Why this path is performant and safe:**
+
+- It avoids one extra async task per request, so Praxis does less scheduling work
+  under load.
+- The one-message buffer gives natural backpressure: if the Go EPP slows down,
+  Praxis cannot keep piling request chunks into memory.
+- Praxis sends headers immediately and continues with the body, avoiding the
+  deadlock where Praxis waits for the EPP while the EPP waits for body EOS.
+- One gRPC stream carries the whole request lifecycle, avoiding repeated stream
+  setup and keeping request state in one place.
+- The exchange state machine rejects out-of-order or unexpected messages instead
+  of applying a processor response to the wrong phase.
+- The state machine makes legal stream transitions explicit, so correctness is
+  enforced by owned request state instead of by sharing the stream behind locks.
+- The clean half-close and trailing drain avoid HTTP/2 reset noise that appeared
+  under high stream rates before the cleanup was added.
+- Compared with Envoy, Praxis does not route through Envoy's generic HTTP
+  filter stack and ORIGINAL_DST cluster machinery for this path; the selected
+  endpoint becomes `ctx.upstream` directly through `endpoint_selector`.
+- Compared with Envoy, the implementation keeps the Go EPP contract but makes
+  the full-duplex exchange state explicit in Praxis code, so ordering,
+  backpressure, timeout, and cleanup behavior are locally testable.
+
+**Alternatives considered:**
+
+- A per-request async worker task would be simpler to sketch, but it adds task
+  creation, scheduler wakeups, and cross-task handoff for every request.
+- Shared stream state behind `Arc<Mutex<_>>` would satisfy ownership and `Sync`
+  constraints, but it puts a runtime lock on the hot path and makes lifecycle
+  ownership less obvious. It also protects memory access, not protocol
+  correctness; a locked stream can still be used in the wrong phase.
+- A serialized send-then-receive model would be easier than full duplex, but it
+  can deadlock this Go EPP path because the EPP waits for request body EOS
+  before returning the endpoint.
+- A larger or unbounded outbound queue would smooth short bursts, but it lets
+  Praxis get too far ahead of the processor and can turn slow EPP behavior into
+  memory growth.
 
 **No per-request worker task:**
 
@@ -390,6 +449,11 @@ trailing messages can cause reset-heavy behavior. The clean half-close plus
 trailing drain is why fresh benchmark runs report zero h2 reset/GOAWAY errors.
 
 ## Exchange State Machine Deep Dive
+
+**Summary:**
+
+The exchange is implemented with separate bootstrap, send-phase, output-phase,
+active-processing, and terminal-state trackers instead of one global phase.
 
 `ExtProcExchange` is deliberately split into several small state domains rather
 than one large enum. That makes each invariant local and testable.
@@ -531,9 +595,10 @@ processor-driven failures such as routing denial or upstream selection failure.
 
 **Summary:**
 
-Praxis needs to remember the EPP conversation between request headers and body
-callbacks. Request-scoped filter state is the pocket where the filter keeps that
-conversation.
+Request-scoped state is implemented with typed per-filter storage keyed by
+stable `filter_id`, then carried across Pingora phases through context
+writeback. That is how the same ext_proc exchange survives from headers to body
+callbacks.
 
 **Technical walkthrough:**
 
@@ -565,9 +630,9 @@ HttpFilterContext sees the same ExtProcState
 
 **Summary:**
 
-The backend address must come from the Go EPP, not from the client. Otherwise a
-client could send `x-gateway-destination-endpoint` and try to route itself to an
-arbitrary target.
+Trusted routing is implemented as an ordered `TrustedHeaderMutation` log from
+processor output. `endpoint_selector` resolves that log without consulting
+original client headers, so the backend address must come from the Go EPP.
 
 **Technical walkthrough:**
 
@@ -598,9 +663,9 @@ endpoint_selector never reads:
 
 **Summary:**
 
-The Go EPP returns the selected backend in a header mutation. The
-`endpoint_selector` filter turns that trusted header value into the Praxis
-upstream target.
+Endpoint selection is implemented as a generic filter that resolves trusted
+destination mutations, validates `host:port`, sets `ctx.upstream`, and strips
+the internal routing header.
 
 **Technical walkthrough:**
 
@@ -631,6 +696,11 @@ Pingora upstream_peer
 ```
 
 ## How This Replaces Envoy In The llm-d Path
+
+**Summary:**
+
+Track B preserves the Go EPP ext_proc contract while replacing Envoy routing
+with Praxis `ext_proc` plus `endpoint_selector` upstream selection.
 
 Envoy baseline:
 
@@ -670,6 +740,11 @@ What changes:
 
 ## Current Boundaries
 
+**Summary:**
+
+This scope stops at request routing; response lifecycle and request trailers
+remain outside this milestone.
+
 This walkthrough describes the accepted request-routing milestone.
 
 Not included yet:
@@ -681,6 +756,11 @@ Not included yet:
 - Removing the Go EPP.
 
 ## Validation Evidence
+
+**Summary:**
+
+The evidence combines unit/state-machine tests with local and KIND smoke runs
+plus benchmark checks for clean stream behavior.
 
 The implementation has been validated with:
 

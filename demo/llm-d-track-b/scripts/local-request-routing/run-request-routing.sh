@@ -15,7 +15,7 @@
 # No llmd_external_epp filter or legacy implementation.
 #
 # Run from the praxis-research-spikes repository:
-#   bash demo/llm-d-track-b-full-duplex/local-go-epp-full-duplex/run-request-routing.sh
+#   bash demo/llm-d-track-b/scripts/local-request-routing/run-request-routing.sh
 #
 # Environment:
 #   TRACK_B_DIR=...          Override the Track B workspace root.
