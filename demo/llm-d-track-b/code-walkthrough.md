@@ -1,7 +1,8 @@
-# Track B Code Walkthrough
+# Praxis ext_proc llm-d Code Walkthrough
 
-This walkthrough explains the current Track B implementation: Praxis uses the
-generic Envoy-compatible `ext_proc` filter plus a generic `endpoint_selector`
+This walkthrough explains the current Praxis ext_proc llm-d integration:
+Praxis uses the generic Envoy-compatible `ext_proc` filter plus a generic
+`endpoint_selector`
 filter to call the existing llm-d Go EPP and route the request to the selected
 backend.
 
@@ -28,7 +29,7 @@ EPP is still waiting to make its endpoint decision. That is what makes
 
 **Technical summary:**
 
-Track B composes two generic Praxis filters:
+The integration composes two generic Praxis filters:
 
 - `ext_proc`: owns one full-duplex `ExternalProcessor.Process` stream per HTTP
   request.
@@ -42,9 +43,10 @@ It does this without a per-request worker task: the pending tonic `Process`
 future, bounded outbound channel, send phases, output phases, and timeout state
 are all owned by one request-scoped state machine.
 
-This milestone proves the llm-d request-routing path: request headers, request
-body, Go EPP endpoint selection, trusted mutation handling, and upstream
-forwarding. Full response-phase lifecycle support is FD04 follow-up work.
+This PoC branch proves the llm-d request-routing path: request headers,
+request body, Go EPP endpoint selection, trusted mutation handling, and upstream
+forwarding. Response-phase lifecycle support is not yet supported in this PoC
+branch; there is no known architecture blocker to adding it.
 
 ```text
 Client
@@ -69,7 +71,7 @@ Selected inference backend
 
 **Summary:**
 
-Track B is implemented across the ext_proc filter/transport, request-scoped
+This integration is implemented across the ext_proc filter/transport, request-scoped
 filter state, trusted-header routing, Pingora lifecycle glue, and the local/KIND
 smoke harnesses.
 
@@ -174,7 +176,8 @@ how to turn EPP responses back into Praxis request changes.
 - `on_request_body()` sends body chunks, sends terminal EOS, then drains the
   Go EPP responses.
 - `on_response()` intentionally skips response-phase callout in full-duplex
-  request-routing mode. Response lifecycle is FD04 scope.
+  request-routing mode. Response lifecycle is not yet supported in this PoC
+  branch.
 
 ```text
 ExtProcFilter
@@ -210,7 +213,7 @@ processing_mode:
 
 These are Envoy `ext_proc` processing-mode concepts exposed through the generic
 Praxis filter. They are explicit because `ext_proc` is not llm-d-specific.
-Track B requires `request_header_mode: send` and
+This integration requires `request_header_mode: send` and
 `request_body_mode: full_duplex_streamed` because the Go EPP needs request
 metadata plus request body EOS before it can select a backend. The response and
 trailer modes are skipped because they are not needed for current llm-d request
@@ -218,12 +221,12 @@ routing.
 
 **Hook-level behavior:**
 
-| Hook | Full-duplex Track B behavior | Performance / correctness reason |
+| Hook | Full-duplex behavior | Performance / correctness reason |
 |---|---|---|
 | `on_request` | Builds `RequestHeaders`, preloads it into the exchange, stores `ExtProcState`. | Starts the Go EPP conversation before body chunks arrive. The first message is queued without waiting for a server response, avoiding the deadlock where the Go EPP waits for body EOS before responding. |
 | `on_request_body` with non-EOS chunk | Sends one `RequestBody` message containing that chunk. | Body bytes are forwarded incrementally during StreamBuffer pre-read. The final EOS callback does not resend accumulated body data. |
 | `on_request_body` at EOS | Sends an empty terminal `RequestBody(end_of_stream=true)`, drains EPP responses, applies mutations, half-closes and drains trailing stream data. | The Go EPP makes the endpoint decision at body EOS. Clean stream closure prevents h2 reset/GOAWAY behavior from abrupt drop. |
-| `on_response` | Returns `Continue` for full-duplex request-routing mode. | Response lifecycle is not needed for Go EPP endpoint selection and remains FD04 follow-up work. |
+| `on_response` | Returns `Continue` for full-duplex request-routing mode. | Response lifecycle is not needed for Go EPP endpoint selection and is not yet supported in this PoC branch. There is no known architecture blocker to adding it. |
 
 ## `ExtProcExchange`
 
@@ -490,7 +493,7 @@ NotStarted -> Headers -> BodyOpen -> BodyEos
 ```
 
 The request direction uses this immediately. The response direction is already
-modeled so FD04 can add response lifecycle without redesigning the exchange.
+modeled so response lifecycle can be added without redesigning the exchange.
 
 The transition rules reject:
 
@@ -675,7 +678,7 @@ the internal routing header.
 - Validates `host:port`, including DNS names, IPv4, and bracketed IPv6.
 - Sets `ctx.upstream`.
 - In `required: true` mode, rejects missing or invalid destinations with the
-  configured status, normally 503 for Track B.
+  configured status, normally 503 for this integration.
 - Strips the internal routing header from:
   - removal queue
   - pending extra headers
@@ -699,7 +702,7 @@ Pingora upstream_peer
 
 **Summary:**
 
-Track B preserves the Go EPP ext_proc contract while replacing Envoy routing
+This integration preserves the Go EPP ext_proc contract while replacing Envoy routing
 with Praxis `ext_proc` plus `endpoint_selector` upstream selection.
 
 Envoy baseline:
@@ -713,7 +716,7 @@ Client
   -> backend
 ```
 
-Track B:
+Praxis ext_proc integration:
 
 ```text
 Client
@@ -738,21 +741,196 @@ What changes:
 - Praxis uses `ctx.upstream` instead of Envoy `ORIGINAL_DST`.
 - Trusted routing-header provenance is enforced by the filter pipeline.
 
+## Engineering Q&A From Review
+
+**Summary:**
+
+This answers implementation-review questions about direct responses, metadata,
+response streaming, trusted header semantics, routing models, endpoint
+validation, fail-open/fail-closed behavior, multi-port pools, and coordinator
+scope.
+
+**Does this support a direct response from the EPP?**
+
+Yes, for Envoy `ImmediateResponse`. `ExtProcExchange` classifies
+`ImmediateResponse` as terminal, and `ExtProcFilter` maps it into a Praxis
+`FilterAction::Reject` using the status, response headers, and body supplied by
+the processor. That supports short-circuit flows where the EPP wants to stop the
+request and return a direct response instead of selecting an upstream.
+
+The current implementation does not treat `ImmediateResponse` as a streaming
+response lifecycle. It is a terminal processor decision. Full response
+inspection and mutation are not yet supported in this PoC branch. There is no
+known architecture blocker to adding them.
+
+**Is Praxis setting up gRPC metadata for subsetting or similar coordinator
+metadata?**
+
+Not beyond the standard `ext_proc` `ProcessingRequest` messages in this
+PoC branch.
+Praxis forwards request headers and body according to `processing_mode`, and it
+can preserve processor `dynamic_metadata` into Praxis structured metadata, but
+it does not yet synthesize Envoy-style attribute metadata, xDS metadata,
+subsetting metadata, or custom gRPC call metadata for the EPP. There is no
+known architecture blocker; the missing work is defining the metadata
+contract and wiring the data source.
+
+For production coordinator/subsetting flows, this needs an explicit contract:
+either encode the required data in request headers, add structured metadata
+fields that the EPP understands, or wire Praxis to the relevant pool/Gateway API
+state and populate the `ext_proc` request context from that state.
+
+**Is response streaming implemented?**
+
+No. The current PoC branch is request-routing only. The current config
+requires `response_header_mode: skip` and `response_body_mode: none` for the
+full-duplex request path.
+
+Response streaming is required for full llm-d parity: response-side KV state
+updates, response mutation, response body processing, and any flow where the
+proxy must let an external processor observe or influence backend responses. It
+is not yet supported in this PoC branch, and there is no known architecture
+blocker to adding it.
+
+**Does Praxis allow multiple values in the EPP response header?**
+
+The mutation layer can record multiple trusted `Add` operations, but
+`endpoint_selector` intentionally resolves the destination to one unambiguous
+value. Identical duplicate values are accepted. Distinct duplicate values are
+rejected as ambiguous. Comma-separated values are also rejected.
+
+That means the current selector does not support "multiple destination headers"
+as a fallback list. Multiple fallback endpoints are not yet supported in this
+PoC branch. There is no known architecture blocker; they need an explicit
+extension with ordered semantics, validation, and health/failure behavior.
+
+**Why does `resolve_trusted_header()` avoid reading client header values? What
+is the risk, and how does `Add` work?**
+
+The risk is destination spoofing. A client could send
+`x-gateway-destination-endpoint: attacker-host:port` and try to bypass the Go
+EPP scheduler or force Praxis to connect to an arbitrary endpoint.
+
+`resolve_trusted_header()` only reads trusted mutation logs created by filters
+or the external processor. It does not merge those values with the original
+client request header. `Add` still works because the EPP's trusted `Add`
+mutations are appended to that log. After replaying the trusted log, Praxis
+accepts a single value, accepts repeated identical values, and rejects distinct
+values as ambiguous.
+
+**What implementation options were considered for llm-d EPP integration?**
+
+| Option | Pros | Cons |
+|---|---|---|
+| Hard-coded llm-d/EPP-specific ext_proc filter | Fastest to tailor to current Go EPP behavior; easy to add llm-d-specific validation. | Creates a bespoke integration path, harder to upstream, harder to reuse for non-llm-d `ext_proc`, and risks coupling Praxis to one scheduler protocol. |
+| Generic `ext_proc` wrapped or chained with an EPP-specific handler | Keeps more of `ext_proc` generic while isolating llm-d policy in a second component; could expose typed llm-d routing concepts. | Adds another integration surface, still needs careful lifecycle ordering, and can drift toward a special-purpose llm-d pipeline. |
+| Generic `ext_proc` plus generic header-based routing filter | Current PoC branch path. Reuses the unchanged Go EPP, keeps `ext_proc` protocol handling generic, and makes routing a normal filter composition. | The routing contract is currently a header value, so richer concepts such as cluster selection, fallback endpoints, pool membership, and multi-port semantics need explicit extensions. |
+
+**Can header-based routing select a cluster, a specific endpoint, or multiple
+fallback endpoints?**
+
+Today it selects one specific endpoint expressed as `host:port` and writes that
+to `ctx.upstream`. It does not select a named cluster, and it does not accept a
+list of fallback endpoints.
+
+The design can be extended in a few directions: allow a destination type
+(`cluster` vs `endpoint`), parse an ordered fallback list, or use structured
+metadata instead of a single header string. Production support should
+also define how fallback ordering interacts with health, retries,
+locality, and pool membership. There is no known architecture blocker to
+adding those routing shapes.
+
+**Does Praxis validate that the selected endpoint is valid within the pool?**
+
+Only syntactically today. `endpoint_selector` validates that the selected value
+is a well-formed `host:port`: non-empty host, valid `u16` port, DNS/IPv4, or
+bracketed IPv6.
+
+It does not validate that the endpoint belongs to an InferencePool, that the
+port is one of the pool's allowed ports, that the endpoint is healthy, or that
+the model/pool mapping permits it. That is not yet supported in this
+PoC branch. There is no known architecture blocker; it requires wiring the
+selector to dynamic pool/Gateway API state rather than treating the EPP response as only a string.
+
+**Is fail-open/fail-closed supported?**
+
+Yes, but at two layers, plus the ext_proc error path:
+
+- The Praxis pipeline has normal `failure_mode` behavior for filter errors.
+- `ext_proc` processor errors use `status_on_error` and become rejections,
+  so EPP unavailable is fail-closed in this integration.
+- `endpoint_selector` has `required: true` plus
+  `status_on_required_failure`, normally 503 for this integration.
+  Required-mode routing failures return a rejection, not a filter error, so they
+  are not bypassed by `failure_mode: open`.
+
+For this integration, EPP unavailable, missing destination, invalid
+destination, or ambiguous destination are fail-closed behaviors. Optional
+`endpoint_selector` mode exists, but it is not the correct setting when the EPP
+is expected to supply the destination.
+
+**Is there support for multi-port inference pools?**
+
+Not as a pool-aware feature. The selected endpoint string may contain any
+syntactically valid port, so a single direct endpoint can point at a non-default
+port. But Praxis does not yet understand named ports, multiple serving ports per
+pool member, or "this endpoint is valid only for this role/port" semantics.
+
+Multi-port inference-pool semantics are not yet supported in this PoC branch.
+There is no known architecture blocker; production support should be modeled
+through pool metadata and validated before `ctx.upstream` is set.
+
+**How does this map to the two llm-d flows?**
+
+This PoC branch mostly proves flow 2:
+
+```text
+coordinator-issued request
+  -> proxy
+  -> EPP
+  -> proxy
+  -> model server
+```
+
+That path repeats for prefill/decode/disaggregation requests and needs the proxy
+to call EPP, accept a destination, and forward to the selected model server.
+
+Flow 1 is different:
+
+```text
+client request
+  -> proxy
+  -> coordinator
+```
+
+In that flow the coordinator becomes the owner of the request and issues
+multiple downstream requests. That requires robust Gateway API/control-plane
+support and a scalable way to keep proxy routing state current.
+
+The static config-file path is acceptable for the PoC filter composition and EPP
+address, but endpoint churn should not be encoded by continually rewriting
+large YAML files. Production needs dynamic pool discovery/reconciliation so the
+Go EPP and/or Praxis selector can validate and route against current
+InferencePool state.
+
 ## Current Boundaries
 
 **Summary:**
 
-This scope stops at request routing; response lifecycle and request trailers
-remain outside this milestone.
+This PoC branch stops at request routing; response lifecycle and request
+trailers are not yet supported here.
 
-This walkthrough describes the accepted request-routing milestone.
+This walkthrough describes the current request-routing implementation.
 
 Not included yet:
 
-- Full Envoy `ext_proc` parity. This milestone proves request routing through
-  Go EPP; full response-phase lifecycle support is FD04 follow-up work.
-- Request trailers, blocked by a Pingora platform boundary.
-- Native in-process scheduling; that is Track A.
+- Full Envoy `ext_proc` parity. This PoC branch proves request routing through
+  Go EPP; response-phase lifecycle support is not yet supported here. There is
+  no known architecture blocker to adding it.
+- Request trailers are not yet supported here. Unlike the other missing pieces,
+  request-trailer support depends on a usable Pingora request-trailer boundary.
+- Native in-process scheduling; this document covers the Go EPP integration
+  path, not an in-process scheduler.
 - Removing the Go EPP.
 
 ## Validation Evidence
@@ -768,7 +946,8 @@ The implementation has been validated with:
 - Parallel and single-threaded exchange tests.
 - Local request-routing smoke with eight wire-level assertions.
 - KIND request-routing smoke with five assertions.
-- Fresh benchmark runs for Track B and Baseline with clean gRPC stream closure.
+- Fresh benchmark runs for this integration and the Envoy baseline with clean
+  gRPC stream closure.
 
 See:
 
