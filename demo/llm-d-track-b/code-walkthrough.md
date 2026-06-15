@@ -913,6 +913,19 @@ large YAML files. Production needs dynamic pool discovery/reconciliation so the
 Go EPP and/or Praxis selector can validate and route against current
 InferencePool state.
 
+**Q&A summary:**
+
+- There are no known architecture blockers for the reviewed follow-on items.
+- Response-side processing, cluster selection, fallback endpoints, multi-port
+  pools, pool membership validation, health validation, and metadata/subsetting
+  are implementation and productization work.
+- Request trailers are the main platform-boundary item because they depend on a
+  usable Pingora request-trailer boundary.
+- The current PoC branch proves the request-routing path needed for
+  coordinator-issued model-server requests through EPP.
+- Production scale should move endpoint churn into dynamic Gateway API or pool
+  state instead of continually rewriting large static config files.
+
 ## Current Boundaries
 
 **Summary:**
