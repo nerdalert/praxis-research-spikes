@@ -7,13 +7,15 @@ $ bash scripts/local-request-routing/run-request-routing.sh
 
 === checking ports ===
 all ports free
+=== building Praxis (ext-proc feature) ===
+=== building Go EPP ===
+=== Praxis runtime config ===
+(ext_proc full_duplex_streamed -> endpoint_selector required 503)
 
-=== starting inference simulator (model=fd03-smoke-...) ===
+=== starting inference simulator ===
 sim ready (2s)
-
 === starting Go EPP on gRPC port 9102 ===
 epp ready (2s)
-
 === starting Praxis on port 18191 ===
 praxis ready (2s)
 
@@ -49,68 +51,97 @@ PASS: exactly one Process invocation per HTTP request
 === test 8: request body preserved ===
 PASS: request body semantic content observed exactly once at backend
 
-=== all 8 PR3 full-duplex request-routing smoke checks passed ===
+=== all 8 full-duplex smoke checks passed ===
+composition: ext_proc (full_duplex_streamed) + endpoint_selector (required, 503)
 --- cleanup ---
 all harness processes stopped
 ```
 
-## KIND Deployment (5 assertions)
+## KIND Deployment (7 assertions)
 
 ```console
 $ bash scripts/kind-request-routing/run-request-routing.sh
 
-=== preflight ===
-tools: kind=kind v0.31.0, kubectl=Client Version: v1.34.3
+=== Praxis full-duplex ext_proc KIND demo ===
 
-=== building Praxis v2 image ===
-=== building Go EPP image ===
-=== building simulator image ===
-all images present
+This deploys the PR3 Praxis source with the generic ext_proc filter,
+the unchanged Go EPP scheduler, and an inference simulator. Each HTTP
+request keeps one bidirectional Process stream open while Praxis sends
+headers, body data, and EOS before Go EPP returns the selected endpoint.
+
+The demo validates request routing only. It does not claim response-phase
+ext_proc processing, vLLM behavior, or Gateway API pool management.
+
+=== preflight and source identity ===
+Praxis source: branch=brent-ext-proc-full-duplex-routing, revision=078e1c13909a, state=dirty
+Composition: ext_proc(request_body_mode=full_duplex_streamed) -> endpoint_selector(required, 503)
+
+=== building images from the declared source checkouts ===
+Praxis image: compiling 078e1c13909a-dirty with the ext-proc feature enabled
+Praxis image identity: sha256:720f1750228b5b8958ddfd12209508c4d2312f388ccf9dd786d2828777712a25
+Praxis image was built directly from 078e1c13909a-dirty in this run
 
 === creating KIND cluster llmd-track-b-v2 ===
-=== loading images into KIND ===
+=== deploying the request-routing composition to namespace llmd-track-b-v2 ===
+all deployments ready: Praxis -> Go EPP -> simulator
+NAME                           READY   IMAGE
+go-epp-674dc99956-fb9g8        true    go-epp-track-b-v2:local
+header-echo-69bf48f994-twlhd   true    header-echo-track-b-v2:local
+praxis-6b9ff48764-ngmqw        true    praxis-track-b-v2:local
+simulator-5db5c8756f-5475f     true    llmd-sim-track-b-v2:local
 
-=== deploying to namespace llmd-track-b-v2 ===
-waiting for simulator...
-deployment "simulator" successfully rolled out
-waiting for Go EPP...
-deployment "go-epp" successfully rolled out
-waiting for Praxis...
-deployment "praxis" successfully rolled out
-all deployments ready
-
-=== test 1: normal request routing ===
+=== test 1: full-duplex routing through the real Go EPP ===
 HTTP status: 200
-PASS: correct model in response
+PASS: HTTP 200 and simulator response identifies model 'track-b-v2-model'
 
-=== test 2: repeated requests ===
+=== test 2: repeated independent requests ===
   request 1: 200 OK
   request 2: 200 OK
   request 3: 200 OK
-PASS: 3 repeated requests succeeded
+PASS: all 3 independent requests completed through the routing path
 
-=== test 3: EPP failure -> 503 -> recovery ===
-HTTP status with EPP down: 503
-PASS: EPP unavailable returns 503
-HTTP status after recovery: 200
-PASS: EPP failure and recovery
+=== test 3: spoofed destination header cannot select upstream ===
+HTTP status with spoofed header: 200
+PASS: client destination was ignored; simulator response identifies model 'track-b-v2-model'
 
-=== test 4: no unexpected h2 errors ===
-PASS: no unexpected h2 errors
+=== test 4: backend header stripping and body integrity ===
+Go EPP now selects the header-echo backend
+HTTP status from header-echo backend: 200
+PASS: x-gateway-destination-endpoint is absent from backend headers
+PASS: backend received non-empty request body (sha256=5881c6b1...)
 
-=== test 5: image identity ===
+=== test 5: EPP failure -> 503 -> recovery ===
+HTTP status: 503 (Go EPP is unavailable)
+PASS: required routing rejects with the configured exact HTTP 503
+HTTP status: 200 (Go EPP recovered)
+PASS: routing recovered after the Go EPP deployment returned
+
+=== test 6: no unexpected h2 errors ===
+h2 reset/GOAWAY mentions in Praxis logs: 0
+PASS: no h2 reset or GOAWAY evidence in Praxis logs (0 mentions)
+
+=== test 7: image identity ===
 deployed image: praxis-track-b-v2:local
-PASS: correct image deployed
+PASS: deployed Praxis image tag matches the image built from 078e1c13909a-dirty
 
 === all KIND request-routing checks passed ===
+cluster: llmd-track-b-v2
+namespace: llmd-track-b-v2
+model: track-b-v2-model
+composition: ext_proc (full_duplex_streamed) + endpoint_selector (required, 503)
+validated: source provenance, routing, repeated requests, client-header distrust,
+backend header stripping, non-empty forwarded body, EPP failure/recovery, h2 log hygiene
 --- cleanup ---
 cluster deleted
 ```
 
-## Claim Boundary
+## Scope Boundary
 
-These demo outputs prove the generic full-duplex request-routing lifecycle.
-Complete response-body and response-trailer lifecycle support is deferred to
-follow-up response-lifecycle work. The request body preserves its JSON
-semantics and arrives once, but the path may normalize JSON field order;
-byte-for-byte preservation is not claimed.
+These outputs prove the generic full-duplex request-routing lifecycle:
+real Praxis + Go EPP + inference simulator. Response-phase ext_proc
+processing, vLLM serving, cache-aware scheduling, and Gateway API
+pool management are not validated here.
+
+The Go EPP re-serializes JSON before forwarding, so request body
+key order may change. Body integrity is verified by non-empty SHA-256,
+not byte-for-byte preservation.
