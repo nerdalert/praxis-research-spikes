@@ -511,7 +511,7 @@ echo "PASS: request body semantic content observed exactly once at backend"
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "=== all 8 FD03 full-duplex smoke checks passed ==="
+echo "=== all 8 full-duplex smoke checks passed ==="
 echo "model: ${RUN_MODEL}"
 echo "composition: ext_proc (full_duplex_streamed) + endpoint_selector (required, 503)"
 echo "logs: ${LOG_DIR}/"

@@ -138,7 +138,7 @@ drop
 | Body mode | Buffered, streamed, or none | Full-duplex streamed (concurrent send/receive) |
 | Endpoint selection | ORIGINAL_DST cluster | `endpoint_selector` filter with trusted mutation provenance |
 | Bootstrap | Awaits process() response | Single-owner pending future, polled inline |
-| Response phase | Full response lifecycle | Not needed for llm-d request routing; FD04 follow-up for broader parity |
+| Response phase | Full response lifecycle | Not needed for llm-d request routing; follow-up response-lifecycle work for broader parity |
 
 ## Base: Praxis PR #428
 
@@ -157,7 +157,7 @@ PR #428 is the assumed base, not one of the three full-duplex PRs.
 
 ### PR 1: Request-Scoped Filter State and Pipeline Pinning
 
-**Status:** Accepted
+**Status:** Merged as PR #609
 
 **Scope:**
 - Per-request typed filter state keyed by stable filter invocation ID
@@ -176,7 +176,7 @@ identity tests.
 
 ### PR 2: Single-Owner Duplex Exchange Core
 
-**Status:** Accepted
+**Status:** Merged as PR #627
 
 **Scope:**
 - `ExtProcExchange` with six orthogonal state domains
@@ -201,7 +201,7 @@ Send+Sync compile-time assertions.
 
 ### PR 3: Generic Full-Duplex Request-Routing Integration
 
-**Status:** Accepted (request routing)
+**Status:** Under upstream review
 
 **Scope:**
 - Full-duplex `request_body_mode: full_duplex_streamed` config and validation
@@ -225,12 +225,17 @@ unchanged Go EPP. It proves the full request-routing path: pre-read body
 processing, EPP communication, trusted endpoint selection, and upstream
 forwarding — all without a custom filter or legacy compatibility layer.
 
-**Evidence:** 100+ integration tests, 8-assertion local smoke, 5-assertion
-KIND deployment, two clean-start smoke runs.
+**Evidence:** 191 ext-proc tests, 2,143 filter tests, 367 protocol tests,
+43 server tests, 8-assertion local smoke, 5-assertion KIND deployment, and
+two clean-start smoke runs. The separate hermetic integration-test PR adds
+standard CI-style coverage for the documented example config.
+
+**Reviewer validation output:** The Track B validation artifact is captured
+under [`validation/`](validation/) with the focused integration-test command
+output and assertion checklist.
 
 **Remaining work:** Broader `ext_proc` parity, especially response lifecycle,
-is future work. It is not a blocker for the accepted llm-d request-routing
-path.
+is future work. It is not a blocker for the llm-d request-routing path in PR3.
 
 ## Non-Blocking Follow-Up Work
 
@@ -239,7 +244,7 @@ features, but they are not required for the llm-d request-routing path proven he
 
 | Item | Needed for current llm-d request routing? | Scope |
 |------|---|-------|
-| FD04A | No | Async multi-output response body foundation for future response lifecycle work. |
-| FD04B | No | Complete response lifecycle integration for response metadata, response body processing, usage/eviction-style flows, and broader parity. |
+| Response body streaming foundation | No | Async multi-output response body foundation for future response lifecycle work. |
+| Complete response lifecycle integration | No | Response metadata, response body processing, usage/eviction-style flows, and broader parity. |
 | Request trailers | No | Blocked on a Pingora platform boundary; not used by the current Go EPP request-routing path. |
 | Full Envoy `ext_proc` parity | No | Broader compatibility work such as response phases, mode overrides, and full mutation-rule coverage. |

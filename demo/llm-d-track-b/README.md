@@ -14,6 +14,7 @@
 | Deployment Guide | [deploy.md](deploy.md) |
 | Demo Scripts | [scripts/](scripts/) |
 | Sample Output | [sample-output.md](sample-output.md) |
+| PR3 Integration Validation | [validation/](validation/) |
 | Benchmark Results | [../llm-d-benchmarks/results.md](../llm-d-benchmarks/results.md) |
 | ext_proc Praxis/llm-d POC Branch | [`nerdalert/praxis:ext-proc-llm-d-praxis-poc-v2`](https://github.com/nerdalert/praxis/tree/ext-proc-llm-d-praxis-poc-v2) |
 | Praxis llm-d Epic | [praxis-proxy/praxis#413](https://github.com/praxis-proxy/praxis/issues/413) |
@@ -112,6 +113,7 @@ For this demo:
 | 01 | Local request routing | Local processes | Client -> Praxis ext_proc -> Go EPP -> backend. Correct model, malicious header ignored, header stripped, body preserved, one Process stream, exact 503, restart recovery. |
 | 02 | KIND deployment | KIND cluster | Same composition in Kubernetes. EPP failure/recovery, image identity, no h2 resets. |
 | 03 | Benchmark comparison | Local benchmark | `praxis-ext-proc-full-duplex-go-epp` vs `envoy-go-epp`. |
+| 04 | Hermetic PR integration validation | Rust integration harness | Reviewer-facing validation for PR3's generic `ext_proc` + `endpoint_selector` request path. Captured output is under [validation/](validation/). |
 
 ## Running the Demos
 
@@ -137,7 +139,7 @@ bash scripts/kind-request-routing/run-request-routing.sh
 - Not full Envoy `ext_proc` parity yet. This milestone proves the llm-d
   request-routing path: request headers, request body, Go EPP endpoint
   selection, trusted mutation handling, and upstream forwarding. Full
-  response-phase lifecycle support is FD04 follow-up work.
+  response-phase lifecycle support is follow-up work.
 - Not native in-process endpoint picking.
 - Not removal of the external Go EPP process.
 - Not full Gateway API provider support.

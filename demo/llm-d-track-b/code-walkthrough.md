@@ -10,6 +10,11 @@ Implementation branch:
 [`nerdalert/praxis:ext-proc-llm-d-praxis-poc-v2`](https://github.com/nerdalert/praxis/tree/ext-proc-llm-d-praxis-poc-v2)
 at commit `d2ca1f1`.
 
+Reviewer note: PR1 and PR2 have landed upstream. PR3 is the current
+request-routing integration under review. A separate hermetic integration-test
+branch adds standard CI-style coverage, with captured output under
+[validation/](validation/).
+
 ## Short Version
 
 **Summary:**
@@ -92,9 +97,10 @@ Important implementation files in the Praxis branch:
 | `protocol/src/http/pingora/handler/request_filter/stream_buffer.rs` | StreamBuffer pre-read loop, body hook execution, ordered mutation capture. | This is where request body chunks are made visible to body filters before upstream selection. It records mutation provenance while preserving request body replay behavior. |
 | `protocol/src/http/pingora/handler/request_filter/mod.rs` | Applies pre-read mutations to session and request snapshot, clears provenance after routing, runs `upstream_peer`. | This makes pre-read EPP mutations visible to the normal request pipeline while still preventing client-supplied destination headers from being trusted. |
 | `protocol/src/http/pingora/handler/{with_body,no_body}.rs` | Handler lifecycle and pinned-pipeline usage. | These handlers ensure a request keeps the same filter pipeline across phases, including hot reload boundaries. |
-| `server/src/main.rs` | Feature-gated `ext_proc` filter registration. | The server binary exposes the generic `ext_proc` filter when built with the `ext-proc` feature, so the demo uses normal Praxis startup/configuration. |
+| `server/src/lib.rs` | Feature-gated `ext_proc` filter registration through the full registry builder. | The server binary exposes the generic `ext_proc` filter when built with the `ext-proc` feature, so the demo uses normal Praxis startup/configuration. |
 | `demo/llm-d-track-b/scripts/local-request-routing/` | Local smoke harness. | Validates the full local process path: Praxis, Go EPP, simulator backend, malicious-header rejection, one Process stream, body preservation, exact 503, and recovery. |
 | `demo/llm-d-track-b/scripts/kind-request-routing/` | KIND smoke harness and manifests. | Validates the same composition in Kubernetes with v2-specific images and failure/recovery checks. |
+| `demo/llm-d-track-b/validation/` | Reviewer-facing PR3 integration-test evidence. | Contains the focused hermetic integration-test output and assertion checklist for the `ext_proc` + `endpoint_selector` request-routing path. Environment-backed llm-d/vLLM scheduler validation remains tracked separately. |
 
 ## Request Flow
 
@@ -133,7 +139,7 @@ on_request
   |
   | ensure_exchange_and_send_headers()
   | - build RequestHeaders
-  | - preload first message
+  | - open_with_request_headers() atomically queues and commits RequestHeaders
   | - store ExtProcState in filter_state
   v
 StreamBuffer pre-read
@@ -241,9 +247,11 @@ single-owner state machine.
 
 **Technical walkthrough:**
 
-- `open()` creates a capacity-1 request channel, preloads the first
-  `ProcessingRequest`, constructs the tonic `process()` future, and returns
-  without awaiting the server.
+- `open()` creates a capacity-1 request channel, constructs the tonic
+  `process()` future, and returns without awaiting the server.
+- `open_with_request_headers()` is used by the PR3 request-routing integration
+  to atomically queue and commit the first `RequestHeaders` envelope with
+  `ProtocolConfiguration`.
 - The pending `process()` future is stored as
   `BootstrapState::Pending(SyncWrapper<PinnedProcessFuture>)`.
 - `send()` validates the outbound transition, reserves bounded channel
@@ -406,9 +414,10 @@ Praxis to send body EOS.
 The accepted `open()` is synchronous:
 
 ```text
-open()
+open_with_request_headers()
   -> create channel
-  -> pre-load RequestHeaders with try_send()
+  -> queue RequestHeaders with ProtocolConfiguration
+  -> commit request-header send state
   -> construct process(request_stream) future
   -> store BootstrapState::Pending
   -> return
@@ -955,10 +964,16 @@ plus benchmark checks for clean stream behavior.
 
 The implementation has been validated with:
 
-- `183` ext-proc tests.
+- `191` ext-proc tests.
+- `2,143` filter tests.
+- `367` protocol tests.
+- `43` server tests.
 - Parallel and single-threaded exchange tests.
 - Local request-routing smoke with eight wire-level assertions.
 - KIND request-routing smoke with five assertions.
+- Hermetic integration-test output under [validation/](validation/) with 13
+  focused assertions for the `ext_proc` + `endpoint_selector` request-routing
+  path.
 - Fresh benchmark runs for this integration and the Envoy baseline with clean
   gRPC stream closure.
 

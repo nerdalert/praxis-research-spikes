@@ -49,7 +49,7 @@ PASS: exactly one Process invocation per HTTP request
 === test 8: request body preserved ===
 PASS: request body semantic content observed exactly once at backend
 
-=== all 8 FD03 full-duplex smoke checks passed ===
+=== all 8 PR3 full-duplex request-routing smoke checks passed ===
 --- cleanup ---
 all harness processes stopped
 ```
@@ -111,6 +111,6 @@ cluster deleted
 
 These demo outputs prove the generic full-duplex request-routing lifecycle.
 Complete response-body and response-trailer lifecycle support is deferred to
-FD04. The request body preserves its JSON semantics and arrives once, but
-the path may normalize JSON field order; byte-for-byte preservation is not
-claimed.
+follow-up response-lifecycle work. The request body preserves its JSON
+semantics and arrives once, but the path may normalize JSON field order;
+byte-for-byte preservation is not claimed.
