@@ -85,6 +85,7 @@ configure_epp_backend() {
     kubectl apply -f "$manifest" >/dev/null
     kubectl -n "$NAMESPACE" rollout restart deployment/go-epp >/dev/null
     kubectl -n "$NAMESPACE" rollout status deployment/go-epp --timeout=60s
+    wait_for_status "200" "{\"model\":\"${V2_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"warmup\"}],\"max_tokens\":5}" "EPP ready with ${backend_name}"
     echo "Go EPP now selects the ${backend_name} backend"
 }
 
@@ -255,15 +256,17 @@ echo "HTTP status: ${HTTP_CODE}"
 
 if [[ "$HTTP_CODE" != "200" ]]; then
     echo "FAIL: expected 200, got ${HTTP_CODE}"
+    echo "response body: ${BODY}"
     kubectl -n "$NAMESPACE" logs deployment/praxis --tail=20 2>/dev/null || true
     kubectl -n "$NAMESPACE" logs deployment/go-epp --tail=20 2>/dev/null || true
     exit 1
 fi
-echo "PASS: HTTP 200 — request routed through Go EPP to the simulator endpoint"
-echo "NOTE: the Go EPP echoes request headers back as ext_proc mutations, which"
-echo "creates duplicate Host headers. The simulator's fasthttp rejects duplicates"
-echo "and returns an empty body. The routing itself works; header deduplication"
-echo "is a known Pingora/EPP interaction, not a PR3 ext_proc defect."
+if ! echo "$BODY" | grep -q "$V2_MODEL"; then
+    echo "FAIL: simulator response does not identify model '${V2_MODEL}'"
+    echo "response body: ${BODY}"
+    exit 1
+fi
+echo "PASS: HTTP 200 and simulator response identifies model '${V2_MODEL}'"
 
 # ---------------------------------------------------------------------------
 # Test 2: Repeated requests
@@ -271,7 +274,9 @@ echo "is a known Pingora/EPP interaction, not a PR3 ext_proc defect."
 
 echo ""
 echo "=== test 2: repeated independent requests ==="
-echo "Exercise three separate HTTP requests so each creates its own Go EPP Process exchange."
+echo "Exercise the complete routing lifecycle three times in succession. The focused"
+echo "Rust integration suite separately verifies one isolated Process stream per request;"
+echo "this cluster check verifies that repeat traffic continues to route successfully."
 for i in 1 2 3; do
     R=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
         -X POST -H "Content-Type: application/json" \
@@ -306,28 +311,63 @@ if [[ "$SPOOF_CODE" != "200" ]]; then
     echo "FAIL: expected 200 (spoofed header ignored, real EPP routes), got ${SPOOF_CODE}"
     exit 1
 fi
-echo "PASS: client destination was ignored; Go EPP selected the reachable simulator (HTTP 200)"
+if ! echo "$SPOOF_BODY" | grep -q "$V2_MODEL"; then
+    echo "FAIL: spoofed request did not reach the configured simulator"
+    exit 1
+fi
+echo "PASS: client destination was ignored; simulator response identifies model '${V2_MODEL}'"
 
 # ---------------------------------------------------------------------------
 # Test 4: Backend does not see internal destination header
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "=== test 4: endpoint_selector strip_header configuration ==="
-echo "The endpoint_selector is configured with strip_header: true. Verify the Praxis"
-echo "config is deployed with this setting and that the Go EPP's selected endpoint is"
-echo "used internally without the routing header reaching the upstream request path."
-STRIP_CONFIG=$(kubectl -n "$NAMESPACE" get configmap praxis-config -o jsonpath='{.data.praxis\.yaml}')
-if ! echo "$STRIP_CONFIG" | grep -q "strip_header: true"; then
-    echo "FAIL: deployed Praxis config does not contain strip_header: true"
+echo "=== test 4: backend header stripping and body integrity ==="
+echo "Point the real Go EPP at the header-echo backend. The backend returns the"
+echo "received headers and a SHA-256 of the request body, proving both that the"
+echo "internal routing header is stripped and that a non-empty request body reaches"
+echo "the selected backend. This check does not claim byte identity: Go EPP"
+echo "re-serializes JSON before forwarding it."
+configure_epp_backend "$HEADER_ECHO_IP" "8080" "header-echo"
+
+STRIP_REQUEST='{"model":"track-b-v2-model","messages":[{"role":"user","content":"strip-check"}],"max_tokens":5}'
+STRIP_RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 15 \
+    -X POST -H "Content-Type: application/json" \
+    "${PRAXIS_URL}/v1/chat/completions" \
+    -d "$STRIP_REQUEST" 2>&1)
+
+STRIP_CODE=$(echo "$STRIP_RESPONSE" | tail -1)
+STRIP_BODY=$(echo "$STRIP_RESPONSE" | head -n -1)
+echo "HTTP status from header-echo backend: ${STRIP_CODE}"
+if [[ "$STRIP_CODE" != "200" ]]; then
+    echo "FAIL: header-echo backend returned ${STRIP_CODE}"
+    echo "response body: ${STRIP_BODY}"
+    kubectl -n "$NAMESPACE" logs deployment/header-echo --tail=10 2>/dev/null || true
+    kubectl -n "$NAMESPACE" logs deployment/praxis --tail=10 2>/dev/null || true
     exit 1
 fi
-echo "PASS: endpoint_selector is configured with strip_header: true"
-echo "NOTE: wire-level header-echo verification is not performed because the Go EPP"
-echo "echoes all request headers as ext_proc mutations, creating duplicate Host headers"
-echo "that prevent clean backend forwarding. This is a known Go EPP + Pingora interaction,"
-echo "not a PR3 endpoint_selector defect. The strip_header logic is proven by the hermetic"
-echo "Rust integration tests (ext_proc_destination_header_stripped)."
+
+if echo "$STRIP_BODY" | grep -qi 'x-gateway-destination-endpoint'; then
+    echo "FAIL: internal destination header reached the backend"
+    echo "response: ${STRIP_BODY}"
+    exit 1
+fi
+echo "PASS: x-gateway-destination-endpoint is absent from backend headers"
+
+BODY_SHA=$(echo "$STRIP_BODY" | grep -oP '"body_sha256":"\K[0-9a-f]{64}')
+EMPTY_SHA="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+if [[ -z "$BODY_SHA" ]]; then
+    echo "FAIL: header-echo response does not contain body_sha256"
+    exit 1
+fi
+if [[ "$BODY_SHA" == "$EMPTY_SHA" ]]; then
+    echo "FAIL: backend received empty body (SHA matches empty input)"
+    exit 1
+fi
+echo "PASS: backend received non-empty request body (sha256=${BODY_SHA})"
+
+echo "Restoring Go EPP to simulator endpoint for the availability test."
+configure_epp_backend "$SIM_IP" "8000" "simulator"
 
 # ---------------------------------------------------------------------------
 # Test 5: EPP failure -> 503 -> recovery
@@ -398,4 +438,4 @@ echo "namespace: ${NAMESPACE}"
 echo "model: ${V2_MODEL}"
 echo "composition: ext_proc (full_duplex_streamed) + endpoint_selector (required, 503)"
 echo "validated: source provenance, routing, repeated requests, client-header distrust,"
-echo "backend header stripping, body preservation, EPP failure/recovery, h2 log hygiene"
+echo "backend header stripping, non-empty forwarded body, EPP failure/recovery, h2 log hygiene"
