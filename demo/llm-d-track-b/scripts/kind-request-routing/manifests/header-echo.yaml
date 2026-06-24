@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: header-echo
+  namespace: llmd-track-b-v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: header-echo
+  template:
+    metadata:
+      labels:
+        app: header-echo
+    spec:
+      containers:
+        - name: header-echo
+          image: header-echo-track-b-v2:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 1
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: header-echo
+  namespace: llmd-track-b-v2
+spec:
+  selector:
+    app: header-echo
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http

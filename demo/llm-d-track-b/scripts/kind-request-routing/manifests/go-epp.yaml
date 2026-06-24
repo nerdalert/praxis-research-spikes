@@ -32,13 +32,13 @@ metadata:
   name: epp-endpoints
   namespace: llmd-track-b-v2
 data:
-  # EPP_SIM_ADDRESS is replaced by the smoke script with the
-  # simulator Service ClusterIP after deployment.
+  # EPP_BACKEND_ADDRESS and EPP_BACKEND_PORT are replaced by the demo script
+  # with the selected backend Service address before Go EPP starts.
   endpoints.yaml: |
     endpoints:
       - name: sim-backend
-        address: "EPP_SIM_ADDRESS"
-        port: "8000"
+        address: "EPP_BACKEND_ADDRESS"
+        port: "EPP_BACKEND_PORT"
 ---
 apiVersion: apps/v1
 kind: Deployment

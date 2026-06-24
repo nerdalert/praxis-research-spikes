@@ -1,0 +1,12 @@
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /build
+COPY header_echo.go .
+RUN CGO_ENABLED=0 go build -o /header-echo header_echo.go
+
+FROM gcr.io/distroless/static:nonroot
+
+COPY --from=builder /header-echo /header-echo
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/header-echo"]
