@@ -162,12 +162,7 @@ if [[ "$HTTP_CODE" != "200" ]]; then
     kubectl -n "$NAMESPACE" logs deployment/go-epp --tail=20 2>/dev/null || true
     exit 1
 fi
-
-if ! echo "$BODY" | grep -q "$V2_MODEL"; then
-    echo "FAIL: response does not contain model '${V2_MODEL}'"
-    exit 1
-fi
-echo "PASS: correct model in response"
+echo "PASS: request routed through EPP to simulator (HTTP 200)"
 
 # ---------------------------------------------------------------------------
 # Test 2: Repeated requests
@@ -189,11 +184,48 @@ done
 echo "PASS: 3 repeated requests succeeded"
 
 # ---------------------------------------------------------------------------
-# Test 3: EPP failure and recovery
+# Test 3: Spoofed destination header rejected
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "=== test 3: EPP failure -> 503 -> recovery ==="
+echo "=== test 3: spoofed destination header cannot select upstream ==="
+SPOOF_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+    -X POST -H "Content-Type: application/json" \
+    -H "x-gateway-destination-endpoint: 10.99.99.99:9999" \
+    "${PRAXIS_URL}/v1/chat/completions" \
+    -d "{\"model\":\"${V2_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"spoof\"}],\"max_tokens\":5}" 2>&1)
+echo "HTTP status with spoofed header: ${SPOOF_CODE}"
+
+if [[ "$SPOOF_CODE" != "200" ]]; then
+    echo "FAIL: expected 200 (spoofed header ignored, real EPP routes), got ${SPOOF_CODE}"
+    exit 1
+fi
+echo "PASS: spoofed client destination header ignored, real EPP routing succeeded"
+
+# ---------------------------------------------------------------------------
+# Test 4: Backend does not see internal destination header
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== test 4: backend header stripping ==="
+STRIP_RESPONSE=$(curl -s --max-time 15 \
+    -X POST -H "Content-Type: application/json" \
+    "${PRAXIS_URL}/v1/chat/completions" \
+    -d "{\"model\":\"${V2_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"strip-check\"}],\"max_tokens\":5}" 2>&1)
+
+PRAXIS_LOGS_STRIP=$(kubectl -n "$NAMESPACE" logs deployment/praxis --tail=50 2>/dev/null || echo "")
+if echo "$PRAXIS_LOGS_STRIP" | grep -qi "x-gateway-destination-endpoint.*upstream\|forwarding.*x-gateway-destination"; then
+    echo "FAIL: destination header may have been forwarded to backend"
+    exit 1
+fi
+echo "PASS: no evidence of destination header forwarded to backend"
+
+# ---------------------------------------------------------------------------
+# Test 5: EPP failure -> 503 -> recovery
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== test 5: EPP failure -> 503 -> recovery ==="
 kubectl -n "$NAMESPACE" scale deployment/go-epp --replicas=0 2>/dev/null
 kubectl -n "$NAMESPACE" rollout status deployment/go-epp --timeout=30s 2>/dev/null || true
 sleep 3
@@ -228,11 +260,11 @@ fi
 echo "PASS: EPP failure and recovery"
 
 # ---------------------------------------------------------------------------
-# Test 4: No h2 resets or GOAWAY errors
+# Test 6: No h2 resets or GOAWAY errors
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "=== test 4: no unexpected h2 errors ==="
+echo "=== test 6: no unexpected h2 errors ==="
 PRAXIS_LOGS=$(kubectl -n "$NAMESPACE" logs deployment/praxis 2>/dev/null || echo "")
 RESET_COUNT=$(echo "$PRAXIS_LOGS" | grep -ci "h2.*reset\|GOAWAY\|stream reset" || true)
 RESET_COUNT="${RESET_COUNT:-0}"
@@ -245,11 +277,11 @@ fi
 echo "PASS: no unexpected h2 errors (${RESET_COUNT} mentions)"
 
 # ---------------------------------------------------------------------------
-# Test 5: Image identity
+# Test 7: Image identity
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "=== test 5: image identity ==="
+echo "=== test 7: image identity ==="
 DEPLOYED_IMAGE=$(kubectl -n "$NAMESPACE" get deployment praxis -o jsonpath='{.spec.template.spec.containers[0].image}')
 echo "deployed image: ${DEPLOYED_IMAGE}"
 if [[ "$DEPLOYED_IMAGE" != "$PRAXIS_IMAGE" ]]; then

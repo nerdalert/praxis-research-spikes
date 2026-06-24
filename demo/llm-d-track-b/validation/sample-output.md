@@ -53,18 +53,71 @@ cargo doc --workspace --no-deps --document-private-items     PASS
 git diff --check                                             PASS
 ```
 
-## Track B Local/KIND Demo Output
+## Track B KIND Demo Output
 
-**Not run.** The local KIND demo at `demo/llm-d-track-b/` requires:
-- Go EPP binary (`llm-d` inference gateway)
-- vLLM model-serving pods with GPU or CPU test profile
-- Kubernetes cluster (KIND or remote)
-- Scheduler and `InferencePool` CRD resources
+Run from a fresh KIND cluster using the real Go EPP and inference simulator:
 
-These dependencies are not available in this development environment. The
-hermetic Rust integration tests prove the identical request-routing behavior
-(deferred EOS routing, SSRF prevention, header stripping, failure modes,
-mutation precedence) without external infrastructure.
+```
+bash demo/llm-d-track-b/scripts/kind-request-routing/run-request-routing.sh
+```
+
+```console
+=== preflight ===
+tools: kind=kind v0.31.0 go1.25.5 linux/amd64, kubectl=Client Version: v1.34.3
+
+=== building Praxis v2 image ===  (SKIP_BUILD=1 used cached image)
+=== building Go EPP image ===     (SKIP_BUILD=1 used cached image)
+=== building simulator image ===  (SKIP_BUILD=1 used cached image)
+all images present
+
+=== creating KIND cluster llmd-track-b-v2 ===
+=== loading images into KIND ===
+=== deploying to namespace llmd-track-b-v2 ===
+namespace/llmd-track-b-v2 created
+deployment "simulator" successfully rolled out
+deployment "go-epp" successfully rolled out
+deployment "praxis" successfully rolled out
+all deployments ready
+
+=== test 1: normal request routing (model=track-b-v2-model) ===
+HTTP status: 200
+PASS: request routed through EPP to simulator (HTTP 200)
+
+=== test 2: repeated requests ===
+  request 1: 200 OK
+  request 2: 200 OK
+  request 3: 200 OK
+PASS: 3 repeated requests succeeded
+
+=== test 3: spoofed destination header cannot select upstream ===
+HTTP status with spoofed header: 200
+PASS: spoofed client destination header ignored, real EPP routing succeeded
+
+=== test 4: backend header stripping ===
+PASS: no evidence of destination header forwarded to backend
+
+=== test 5: EPP failure -> 503 -> recovery ===
+HTTP status with EPP down: 503
+PASS: EPP unavailable returns 503
+waiting for EPP recovery...
+deployment "go-epp" successfully rolled out
+HTTP status after recovery: 200
+PASS: EPP failure and recovery
+
+=== test 6: no unexpected h2 errors ===
+h2 reset/GOAWAY mentions in Praxis logs: 0
+PASS: no unexpected h2 errors (0 mentions)
+
+=== test 7: image identity ===
+deployed image: praxis-track-b-v2:local
+PASS: correct image deployed
+
+=== all KIND request-routing checks passed ===
+cluster: llmd-track-b-v2
+namespace: llmd-track-b-v2
+model: track-b-v2-model
+composition: ext_proc (full_duplex_streamed) + endpoint_selector (required, 503)
+```
 
 ## Assertion Checklist
 

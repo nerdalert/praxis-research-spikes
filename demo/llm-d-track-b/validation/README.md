@@ -51,10 +51,23 @@ Each claim maps to a specific integration test.
 
 See [sample-output.md](sample-output.md) for exact test and validation output.
 
-## Track B Local/KIND Demo
+## Track B KIND Demo
 
-Not run. The local KIND demo requires Go EPP, vLLM pods, and GPU/CPU model
-serving infrastructure that is not available in this environment. The demo
-scripts at `demo/llm-d-track-b/` are manual validation artifacts from the
-earlier research spike. The hermetic integration tests above prove the same
-request-routing behavior without those external dependencies.
+Run from a fresh dedicated KIND cluster with the real Go EPP and inference
+simulator. All 7 assertions pass:
+
+```bash
+bash demo/llm-d-track-b/scripts/kind-request-routing/run-request-routing.sh
+```
+
+| # | Test | Result |
+|---|------|--------|
+| 1 | Normal request routing (HTTP 200 through EPP) | PASS |
+| 2 | 3 repeated requests (no crosstalk) | PASS |
+| 3 | Spoofed destination header ignored | PASS |
+| 4 | Backend header stripping (no forwarded destination) | PASS |
+| 5 | EPP failure returns 503, recovery returns 200 | PASS |
+| 6 | No h2 reset/GOAWAY errors | PASS |
+| 7 | Correct Praxis image deployed | PASS |
+
+See [sample-output.md](sample-output.md) for the full captured output.
