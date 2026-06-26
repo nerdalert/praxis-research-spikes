@@ -44,15 +44,19 @@ Validates local A2A task-ownership routing, including task capture from SendMess
 
 ## Spikes
 
-### [Gateway-to-Gateway Routing Implementation Plan](gateway-to-gateway-routing-plan.md)
+### [Gateway-to-Gateway Routing Implementation Plan](research/gateway-to-gateway-routing/)
 
 Implementation plan for the Praxis data-plane portion of AI Grid
 gateway-to-gateway connectivity, mTLS trust, site metadata, and
 cross-gateway inference/agent routing.
 
-### [Stateful Proxy Analysis](stateful-proxy/)
+### [Stateful Proxy Analysis](research/stateful-proxy/)
 
 Research and proposal material for Praxis state management across request metadata, local runtime state, shared hot-path state, durable business state, and configuration state.
+
+### [Agentic Loop](research/agentic-loop/)
+
+End-to-end demo and implementation plan for the Praxis agentic orchestration loop.
 
 ## Repository Layout
 
