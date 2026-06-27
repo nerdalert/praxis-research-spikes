@@ -1,0 +1,153 @@
+# Site A — origin gateway
+#
+# Public listener for client traffic (plain HTTP).
+# Grid listener for peer gateway traffic (mTLS required).
+# Upstream mTLS clusters for site-b and site-c gateways.
+
+listeners:
+  - name: public
+    address: "127.0.0.1:18100"
+    filter_chains:
+      - public-security
+      - ai-classify
+      - grid-route
+      - routing
+
+  - name: grid
+    address: "127.0.0.1:18101"
+    filter_chains:
+      - grid-trust
+      - routing
+    tls:
+      certificates:
+        - cert_path: certs/site-a.pem
+          key_path: certs/site-a-key.pem
+      client_ca:
+        ca_path: certs/grid-ca.pem
+      client_cert_mode: require
+
+filter_chains:
+  - name: grid-trust
+    filters:
+      - filter: grid_ingress_trust
+        trusted_peers:
+          - organization: praxis-grid-e2e
+
+  # Defense-in-depth: Praxis already rejects x-praxis-* headers from
+  # clients at the protocol layer (reserved_headers.rs). This filter
+  # chain is redundant for x-praxis-* but demonstrates the intent for
+  # any future non-reserved internal headers.
+  - name: public-security
+    filters:
+      - filter: headers
+        request_remove:
+          - "x-praxis-grid-origin"
+          - "x-praxis-grid-capability"
+          - "x-praxis-grid-generation"
+          - "x-praxis-grid-site"
+          - "x-praxis-grid-route-id"
+
+  - name: ai-classify
+    filters:
+      - filter: model_to_header
+      - filter: json_rpc
+        on_invalid: continue
+      - filter: mcp
+        on_invalid: continue
+
+  - name: grid-route
+    filters:
+      - filter: grid_route
+        local_site: site-a
+        candidates:
+          - kind: inference_model
+            name: local-model
+            site: site-a
+            cluster: local-inference
+          - kind: inference_model
+            name: site-b-model
+            site: site-b
+            cluster: grid-site-b
+          - kind: inference_model
+            name: site-c-model
+            site: site-c
+            cluster: grid-site-c
+          - kind: inference_model
+            name: shared-model
+            site: site-a
+            cluster: local-inference
+          - kind: inference_model
+            name: shared-model
+            site: site-b
+            cluster: grid-site-b
+            fresh: false
+          - kind: inference_model
+            name: freshness-model
+            site: site-b
+            cluster: grid-site-b
+            fresh: false
+          - kind: inference_model
+            name: freshness-model
+            site: site-c
+            cluster: grid-site-c
+          - kind: inference_model
+            name: equal-model
+            site: site-b
+            cluster: grid-site-b
+          - kind: inference_model
+            name: equal-model
+            site: site-a
+            cluster: local-inference
+          - kind: mcp_tool
+            name: weather-lookup
+            site: site-c
+            cluster: grid-site-c
+
+  - name: routing
+    filters:
+      - filter: router
+        routes:
+          - path_prefix: "/v1/chat/completions"
+            cluster: local-inference
+          - path_prefix: "/mcp"
+            cluster: local-mcp
+          - path_prefix: "/a2a"
+            cluster: local-a2a
+          - path_prefix: "/"
+            cluster: local-inference
+
+      - filter: load_balancer
+        clusters:
+          - name: local-inference
+            endpoints:
+              - "127.0.0.1:18001"
+
+          - name: local-mcp
+            endpoints:
+              - "127.0.0.1:18002"
+
+          - name: local-a2a
+            endpoints:
+              - "127.0.0.1:18003"
+
+          - name: grid-site-b
+            tls:
+              sni: site-b
+              ca:
+                ca_path: certs/grid-ca.pem
+              client_cert:
+                cert_path: certs/site-a-client.pem
+                key_path: certs/site-a-client-key.pem
+            endpoints:
+              - "127.0.0.1:18110"
+
+          - name: grid-site-c
+            tls:
+              sni: site-c
+              ca:
+                ca_path: certs/grid-ca.pem
+              client_cert:
+                cert_path: certs/site-a-client.pem
+                key_path: certs/site-a-client-key.pem
+            endpoints:
+              - "127.0.0.1:18120"

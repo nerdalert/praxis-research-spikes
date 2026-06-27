@@ -1,0 +1,52 @@
+# Site C — remote gateway
+#
+# Grid listener only (mTLS required).
+# Routes to local mock backends.
+
+listeners:
+  - name: grid
+    address: "127.0.0.1:18120"
+    filter_chains:
+      - grid-trust
+      - routing
+    tls:
+      certificates:
+        - cert_path: certs/site-c.pem
+          key_path: certs/site-c-key.pem
+      client_ca:
+        ca_path: certs/grid-ca.pem
+      client_cert_mode: require
+
+filter_chains:
+  - name: grid-trust
+    filters:
+      - filter: grid_ingress_trust
+        trusted_peers:
+          - organization: praxis-grid-e2e
+
+  - name: routing
+    filters:
+      - filter: router
+        routes:
+          - path_prefix: "/v1/chat/completions"
+            cluster: local-inference
+          - path_prefix: "/mcp"
+            cluster: local-mcp
+          - path_prefix: "/a2a"
+            cluster: local-a2a
+          - path_prefix: "/"
+            cluster: local-inference
+
+      - filter: load_balancer
+        clusters:
+          - name: local-inference
+            endpoints:
+              - "127.0.0.1:18021"
+
+          - name: local-mcp
+            endpoints:
+              - "127.0.0.1:18022"
+
+          - name: local-a2a
+            endpoints:
+              - "127.0.0.1:18023"

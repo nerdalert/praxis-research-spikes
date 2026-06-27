@@ -1,0 +1,4 @@
+certs/
+.pids/
+.logs/
+__pycache__/

@@ -26,6 +26,13 @@ large-prompt body handling, GuideLLM simulator echo, and analysis.
 
 ## Other Demos
 
+### [Gateway-to-Gateway Routing E2E](demo/gateway-to-gateway-routing/)
+
+Validation workspace for the gateway-to-gateway connectivity, metadata, and
+routing epic. Proves the full three-gateway path before upstream PRs are split.
+
+---
+
 ### [Responses API Agentic Loop](demo/v1-responses/)
 
 Validates the Praxis-owned Responses API agentic orchestration loop where Praxis acts as the orchestration engine between the client and the model.
@@ -46,9 +53,8 @@ Validates local A2A task-ownership routing, including task capture from SendMess
 
 ### [Gateway-to-Gateway Routing Implementation Plan](research/gateway-to-gateway-routing/)
 
-Implementation plan for the Praxis data-plane portion of AI Grid
-gateway-to-gateway connectivity, mTLS trust, site metadata, and
-cross-gateway inference/agent routing.
+Implementation plan for the Praxis gateway-to-gateway connectivity, mTLS trust,
+site metadata, and cross-gateway inference/agent routing epic.
 
 ### [Stateful Proxy Analysis](research/stateful-proxy/)
 
