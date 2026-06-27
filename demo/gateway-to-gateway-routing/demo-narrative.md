@@ -12,7 +12,9 @@ Show that the gateway-to-gateway architecture for
 is understandable, defensible, and validated before upstream PR work begins.
 
 This demo is not a PR. It is the evidence-gathering step before we split the
-work into production PRs.
+work into production PRs. The demo implementation source is:
+
+**POC branch:** [`nerdalert/praxis@praxis-multi-cluster-poc-v1`](https://github.com/nerdalert/praxis/tree/praxis-multi-cluster-poc-v1)
 
 **Plain-language summary:** this demo shows one Praxis gateway safely handing an
 AI request to another Praxis gateway, while proving that untrusted traffic and
@@ -419,14 +421,16 @@ Quick reference for running the demo end to end.
 
 **Prerequisites:**
 
-- Praxis binary built from the E2E worktree (`cargo build -p praxis-proxy --bin praxis`)
+- Praxis binary built from POC branch: `nerdalert/praxis@praxis-multi-cluster-poc-v1`
 - `openssl`, `python3`, `curl`
 - No processes on ports 18001-18003, 18011-18013, 18021-18023, 18100-18101, 18110, 18120
+
+Demo reviewers should build against the POC branch or use `PRAXIS_BIN` override.
 
 **Command sequence:**
 
 ```console
-cd /home/ubuntu/praxxis/ai-grid/praxis-research-spikes/demo/gateway-to-gateway-routing
+cd praxis-research-spikes/demo/gateway-to-gateway-routing
 bash scripts/cleanup.sh || true
 rm -rf certs .pids .logs
 bash scripts/check-prereqs.sh

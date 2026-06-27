@@ -4,7 +4,8 @@ set -euo pipefail
 # Check that all required tools are available for the G2G E2E demo.
 
 DEMO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PRAXIS_WORKTREE="${PRAXIS_WORKTREE:-/home/ubuntu/praxxis/ai-grid/prs/gateway-to-gateway-e2e/praxis}"
+# Default assumes POC branch checkout as sibling to spike repo
+PRAXIS_WORKTREE="${PRAXIS_WORKTREE:-$DEMO_DIR/../../../praxis}"
 PRAXIS_BIN="${PRAXIS_BIN:-}"
 
 ok=true
@@ -32,7 +33,7 @@ elif [ -x "$PRAXIS_WORKTREE/target/debug/praxis" ]; then
 elif [ -x "$PRAXIS_WORKTREE/target/release/praxis" ]; then
     printf "  %-20s %s\n" "praxis" "$PRAXIS_WORKTREE/target/release/praxis"
 else
-    printf "  %-20s MISSING (build with: cargo build -p praxis-proxy --bin praxis)\n" "praxis"
+    printf "  %-20s MISSING (build from nerdalert/praxis@praxis-multi-cluster-poc-v1)\n" "praxis"
     ok=false
 fi
 

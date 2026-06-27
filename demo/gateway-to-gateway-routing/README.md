@@ -42,20 +42,38 @@ a trusted peer, then forwards to its own local backend.
 
 ## Prerequisites
 
-- Praxis binary built from the E2E worktree
+- Praxis binary built from the POC branch: `nerdalert/praxis@praxis-multi-cluster-poc-v1`
 - `openssl`, `python3`, `curl`
 
-Build the binary:
+This demo expects a Praxis binary built from the POC branch. This is a **demo/validation branch only** — not an upstream PR.
+
+## Build the POC binary
 
 ```console
-cd /home/ubuntu/praxxis/ai-grid/prs/gateway-to-gateway-e2e/praxis
-cargo build -p praxis-proxy --bin praxis
+# Clone the POC branch
+git clone https://github.com/nerdalert/praxis.git
+cd praxis
+git switch praxis-multi-cluster-poc-v1
+cargo build -p praxis --bin praxis
+
+# Run demo with the POC binary
+cd ../praxis-research-spikes/demo/gateway-to-gateway-routing
+PRAXIS_BIN=../../../praxis/target/debug/praxis bash scripts/run-demo.sh
 ```
+
+**Alternative:** If you have the Praxis POC binary built elsewhere, set `PRAXIS_BIN` to point to it:
+
+```console
+PRAXIS_BIN=/path/to/your/praxis bash scripts/run-demo.sh
+```
+
+The demo package itself uses relative paths where possible and is portable across local checkout structures.
 
 ## Running the demo
 
 ```console
-cd /home/ubuntu/praxxis/ai-grid/praxis-research-spikes/demo/gateway-to-gateway-routing
+# Navigate to the demo directory (adjust path if needed)
+cd praxis-research-spikes/demo/gateway-to-gateway-routing
 
 # Check prerequisites
 bash scripts/check-prereqs.sh

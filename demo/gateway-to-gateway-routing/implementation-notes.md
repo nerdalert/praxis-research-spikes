@@ -1,14 +1,16 @@
 # Gateway-to-gateway E2E implementation notes
 
-## E2E worktree
+## POC branch
 
 | Property | Value |
 | --- | --- |
-| Path | `/home/ubuntu/praxxis/ai-grid/prs/gateway-to-gateway-e2e/praxis` |
-| Branch | `dev/gateway-to-gateway-e2e` |
+| Repository | `nerdalert/praxis` |
+| Branch | `praxis-multi-cluster-poc-v1` |
 | Base commit | `60f1041` (`fix(store): move conversation lifecycle to ConversationItemStore (#717)`) |
-| Remote | `origin` → `https://github.com/nerdalert/praxis.git` |
-| State | Clean, no local changes |
+| POC commit | `05353df` (Gateway-to-gateway E2E POC implementation) |
+| URL | https://github.com/nerdalert/praxis/tree/praxis-multi-cluster-poc-v1 |
+
+**Note:** Production extraction remains future work. This branch contains POC-quality implementation for demo validation only.
 
 ## E2E architecture
 

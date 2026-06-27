@@ -4,8 +4,8 @@ Frozen output from the clean demo run on 2026-06-27.
 
 ## Source revisions
 
-- Spike repo: `praxis-research-spikes` main
-- E2E worktree: `dev/gateway-to-gateway-e2e` based on `60f1041`
+- Spike repo: `praxis-research-spikes` branch `codex/gateway-to-gateway-demo`
+- POC branch: `nerdalert/praxis@praxis-multi-cluster-poc-v1` (commit `05353df`)
 - E2E tasks completed: G2G-E2E-00 through G2G-E2E-05
 
 ## Command

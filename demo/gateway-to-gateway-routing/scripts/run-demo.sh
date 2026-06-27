@@ -11,7 +11,8 @@ DEMO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPTS_DIR="$DEMO_DIR/scripts"
 PID_DIR="$DEMO_DIR/.pids"
 LOG_DIR="$DEMO_DIR/.logs"
-PRAXIS_WORKTREE="${PRAXIS_WORKTREE:-/home/ubuntu/praxxis/ai-grid/prs/gateway-to-gateway-e2e/praxis}"
+# Default assumes POC branch checkout as sibling to spike repo
+PRAXIS_WORKTREE="${PRAXIS_WORKTREE:-$DEMO_DIR/../../../praxis}"
 
 if [ -n "${PRAXIS_BIN:-}" ] && [ -x "${PRAXIS_BIN}" ]; then
     PRAXIS="$PRAXIS_BIN"
@@ -20,7 +21,7 @@ elif [ -x "$PRAXIS_WORKTREE/target/debug/praxis" ]; then
 elif [ -x "$PRAXIS_WORKTREE/target/release/praxis" ]; then
     PRAXIS="$PRAXIS_WORKTREE/target/release/praxis"
 else
-    echo "ERROR: praxis binary not found. Build with: cargo build -p praxis-proxy --bin praxis"
+    echo "ERROR: praxis binary not found. Build from: nerdalert/praxis@praxis-multi-cluster-poc-v1"
     exit 1
 fi
 
