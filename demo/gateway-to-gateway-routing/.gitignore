@@ -2,3 +2,4 @@ certs/
 .pids/
 .logs/
 __pycache__/
+claude-code-prompts.md
