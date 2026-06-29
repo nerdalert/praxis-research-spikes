@@ -39,6 +39,49 @@ a trusted peer, then forwards to its own local backend.
 | MCP tool route | JSON-RPC `tools/call` for `weather-lookup` crosses gateway boundary. |
 | Safe metadata | Route decisions logged with bounded keys/values; no prompts or secrets. |
 
+## Client transaction block diagram
+
+This is the basic shape of one client request. The origin gateway makes a local
+route decision from already-loaded routing data; it does not query a database,
+operator, SWIM/gossip, Kubernetes, or metrics service while the client waits.
+
+```text
+Client
+  |
+  | OpenAI-style inference request or JSON-RPC/MCP tool call
+  v
+Site A Praxis public listener (:18100)
+  |
+  | 1. Parse bounded routing facts
+  |    - model name for inference
+  |    - tool name for MCP
+  |
+  | 2. Read local routing snapshot/config
+  |    - known sites
+  |    - capability candidates
+  |    - freshness/locality hints
+  |
+  | 3. Select target cluster
+  |
+  +------------------------------+
+  |                              |
+  | local target                 | remote target over mTLS
+  v                              v
+Site A local backend        Site B/C Praxis grid listener (:18110/:18120)
+  |                              |
+  |                              | 4. Verify peer certificate identity
+  |                              | 5. Apply grid_ingress_trust
+  |                              | 6. Route to local backend
+  v                              v
+Response                    Site B/C local backend
+  ^                              |
+  |                              v
+  +------------------------- Response returns on the same gateway path
+```
+
+The remote gateway still enforces its own trust decision. A route decision from
+Site A is not a free pass into Site B or Site C.
+
 ## Non-goals
 
 - No global membership, SWIM, gossip, CRDT replication, or operator behavior.
@@ -142,8 +185,8 @@ a grid listener (mTLS). Sites B and C have grid listeners only.
 ## Upstream PR stack
 
 See [pr-extraction-map.md](pr-extraction-map.md) for the complete extraction
-plan. Production prompts for each upstream PR are in
-[claude-code-prompts.md](claude-code-prompts.md).
+plan. Claude prompt drafts are intentionally kept local/private and are not
+tracked in this public spike package.
 
 | Target | Status |
 | --- | --- |
@@ -167,9 +210,8 @@ plan. Production prompts for each upstream PR are in
 | [run-complete-e2e-demo.sh](run-complete-e2e-demo.sh) | Generates a Markdown command/output transcript for the full demo. |
 | [pr-extraction-map.md](pr-extraction-map.md) | Upstream PR split with evidence references. |
 | [pr-stack-documentation-plan.md](pr-stack-documentation-plan.md) | Documentation contract between Claude and Codex. |
-| [claude-code-prompts.md](claude-code-prompts.md) | E2E task prompts and validated production prompts. |
 | [sample-output.md](sample-output.md) | Sanitized demo output. |
 | `configs/` | Praxis YAML configs for three gateways. |
 | `scripts/` | Demo lifecycle scripts. |
 | `mocks/` | Python mock backends for inference, MCP, and A2A. |
-| `.gitignore` | Excludes `certs/`, `.pids/`, `.logs/`. |
+| `.gitignore` | Excludes generated certs/logs/PIDs and local-only Claude prompt drafts. |
