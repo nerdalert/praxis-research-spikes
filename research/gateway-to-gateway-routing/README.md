@@ -13,7 +13,7 @@ issue is [#690](https://github.com/praxis-proxy/praxis/issues/690); related
 scope boundaries include the policy epic [#678](https://github.com/praxis-proxy/praxis/issues/678)
 and the llm-d epic [#16](https://github.com/praxis-proxy/praxis/issues/16).
 
-## Layperson summary
+## Summary
 
 Epic 664 is about making Praxis gateways talk to each other safely.
 
