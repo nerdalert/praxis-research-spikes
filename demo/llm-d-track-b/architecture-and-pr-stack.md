@@ -18,11 +18,45 @@ This is a request-routing milestone. The llm-d Go EPP scheduling decision
 happens on the request path at body EOS, so response-phase lifecycle support
 is not required for this milestone.
 
+Follow-up work is intentionally staged into separate repo copies and PR-sized
+branches. The operational inventory and rebase/open checklist live in the
+companion planning workspace as `e2e-pr-staging-playbook.md`; the copy/paste
+Claude prompts live there as `future-pr-claude-prompts.md`; the director notes
+for the Codex/Claude workflow live there as `director-architecture-notes.md`.
+The engineering feedback that drives PR6 and later is tracked in
+[Engineering Q&A From Review](https://github.com/nerdalert/praxis-research-spikes/blob/main/demo/llm-d-track-b/code-walkthrough.md#engineering-qa-from-review).
+
 ## Implementation Branch
 
 The current implementation is on the
 [ext_proc Praxis/llm-d POC branch](https://github.com/nerdalert/praxis/tree/ext-proc-llm-d-praxis-poc-v2)
 at commit `d2ca1f1`.
+
+## Staged Follow-Up Workspaces
+
+The upstream PRs are intentionally staged from separate repo copies so each
+follow-up can be rebased, reviewed, and opened independently:
+
+| Stage | Purpose | Local Planning Status |
+|---|---|---|
+| PR3 | Generic full-duplex request-routing integration. | Open upstream as praxis-proxy/praxis#707. |
+| PR4 | Hermetic Rust integration tests for PR3. | Prepared locally; open only after PR3 merges and the branch is rebased. |
+| PR5 | Real-cluster llm-d/vLLM validation harness for issue #295. | Prepared locally; reports PASS only with real scheduler evidence, otherwise SKIP. |
+| PR6 | Response-header lifecycle, the first Envoy parity follow-up. | Staged locally with bounded cleanup and focused lifecycle tests; rebase and fully validate after PR3 merges. |
+| PR7 | Generic async/multi-output response-body lifecycle foundation. | Design discovery next; no production code until a separate PR7 repo copy and design constraints are created. |
+| PR8 | Response-body `ext_proc` integration on top of the PR7 body primitive. | Planned; do not start until PR7 proves the generic lifecycle boundary. |
+| PR9 | Request/response trailers. | Planned; depends on a clear Pingora trailer hook boundary. |
+| PR10 | Processing-mode override matrix. | Planned; depends on request, response-header, response-body, and trailer phase behavior being explicit. |
+| PR11 | Mutation and forwarding rules. | Planned; includes generic header/body mutation policy, not llm-d-specific exceptions. |
+| PR12 | Metadata options and attribute forwarding. | Planned; requires an explicit contract for structured metadata, gRPC metadata, and Envoy-style attributes. |
+| PR13 | Failure, per-route, and processor-target overrides. | Planned; should stay generic and composable with existing filter config patterns. |
+| PR14 | Observability mode. | Planned; processor observation without mutation must be separate from routing/mutation behavior. |
+| PR15 | Fuller immediate-response parity. | Planned; covers direct responses beyond the minimal terminal response path needed by PR3. |
+| PR16 | Stats, docs, examples, and conformance hardening. | Planned; final parity pass after the behavioral PRs land. |
+| Product routing follow-up | Pool membership validation, cluster/pool routing, fallback endpoints, model-to-pool authorization, role and named-port validation. | Planned separately from Envoy parity; driven by llm-d product semantics and issue #295 evidence. |
+
+The exact local directory inventory and rebase/open checklist are maintained in
+the companion planning workspace as `e2e-pr-staging-playbook.md`.
 
 ## Request Path
 
@@ -138,7 +172,7 @@ drop
 | Body mode | Buffered, streamed, or none | Full-duplex streamed (concurrent send/receive) |
 | Endpoint selection | ORIGINAL_DST cluster | `endpoint_selector` filter with trusted mutation provenance |
 | Bootstrap | Awaits process() response | Single-owner pending future, polled inline |
-| Response phase | Full response lifecycle | Not needed for llm-d request routing; follow-up response-lifecycle work for broader parity |
+| Response phase | Full response lifecycle | Not needed for llm-d request routing; PR6+ follow-up parity work |
 
 ## Base: Praxis PR #428
 
@@ -226,7 +260,7 @@ processing, EPP communication, trusted endpoint selection, and upstream
 forwarding — all without a custom filter or legacy compatibility layer.
 
 **Evidence:** 191 ext-proc tests, 2,143 filter tests, 367 protocol tests,
-43 server tests, 8-assertion local smoke, 5-assertion KIND deployment, and
+43 server tests, 8-assertion local smoke, 7-assertion KIND deployment, and
 two clean-start smoke runs. The separate hermetic integration-test PR adds
 standard CI-style coverage for the documented example config.
 
@@ -237,6 +271,211 @@ output and assertion checklist.
 **Remaining work:** Broader `ext_proc` parity, especially response lifecycle,
 is future work. It is not a blocker for the llm-d request-routing path in PR3.
 
+### PR 4: Hermetic Full-Duplex Request-Routing Integration Tests
+
+**Status:** Staged locally; rebase and open after PR3 merges
+
+**Scope:**
+- In-process tonic `ExternalProcessor` mock
+- Recording backend for no-backend-hit assertions
+- Documented example-config integration test
+- RequestHeaders first-message assertion
+- RequestBody non-terminal chunk and terminal EOS assertions
+- Spoofed destination rejection
+- Invalid, missing, and ambiguous destination rejection
+- Processor failure returns configured status
+- Immediate response does not hit backend
+- Repeated requests use independent Process streams
+
+**Why it matters:**
+PR4 turns the PR3 request-routing behavior into standard hermetic integration
+coverage. It proves the generic Praxis `ext_proc` plus `endpoint_selector`
+composition without Docker, KIND, the Go EPP, or vLLM.
+
+**Boundary:** PR4 does not close llm-d issue #295. It proves Praxis behavior
+with a mock processor, not real scheduler/cache/pool behavior.
+
+### PR 5: Environment-Backed llm-d/vLLM Validation
+
+**Status:** Staged locally as executable validation infrastructure; open after
+PR4 shape is stable
+
+**Scope:**
+- Praxis as the gateway in an llm-d environment
+- Real llm-d scheduler/EPP components
+- vLLM model-serving pods where available
+- EPP endpoint selection under load/cache scenarios
+- Prefix cache-aware routing with shared system prompts
+- InferenceModel traffic splitting across multiple InferencePools
+- Disaggregated prefill/decode routing when supported by the installed llm-d
+  version
+- Repeatable validation command and sanitized reviewer output
+
+**Why it matters:**
+PR5 is the environment-backed validation phase for
+[praxis-proxy/praxis#295](https://github.com/praxis-proxy/praxis/issues/295).
+It should prove the real llm-d composition. It should not be presented as
+generic Envoy `ext_proc` parity.
+
+### PR 6: Response-Header Lifecycle
+
+**Status:** Staged locally; rebase and revalidate after PR3 merges
+
+**Scope:**
+- Accept `response_header_mode: send`.
+- Reuse the existing request exchange when response headers are configured.
+- Send `ResponseHeaders` during `on_response`.
+- Apply response header mutations.
+- Preserve response-phase dynamic metadata.
+- Define response-header `ImmediateResponse` behavior.
+- Use bounded cleanup for request/response-header exchange paths outside the
+  existing request-body lifecycle timeout.
+
+**Why it matters:**
+PR6 is the first Envoy parity follow-up. It proves the same single-owner
+exchange can safely span request and response header phases without adding a
+worker task, unbounded queue, or shared stream lock.
+
+**Boundary:** PR6 does not implement response body, trailers, mode override,
+mutation rules, metadata options, observability mode, per-route overrides, or
+llm-d product routing.
+
+### PR 7: Generic Response-Body Lifecycle Foundation
+
+**Status:** Planned; design discovery next
+
+PR7 should be design-first. It owns the generic Praxis async/multi-output
+response-body lifecycle foundation. It should not start as `ext_proc` response
+body code.
+
+**Scope:**
+- Define how a response body can be observed, buffered, streamed, replaced, or
+  passed through by a filter.
+- Define backpressure and ownership rules for async/multi-output body
+  processing.
+- Keep this generic to Praxis rather than coupling the primitive directly to
+  `ext_proc`.
+- Document how the body primitive interacts with `StreamBuffer`, response
+  headers, downstream writes, and error handling.
+
+**Boundary:** PR7 should not implement the Envoy `ResponseBody` protocol
+messages yet. That belongs in PR8 after the generic lifecycle contract is clear.
+
+### PR 8: Response-Body ext_proc Integration
+
+**Status:** Planned after PR7
+
+**Scope:**
+- Send Envoy `ResponseBody` messages when response body processing is
+  configured.
+- Apply streamed response body mutations according to the PR7 lifecycle
+  contract.
+- Preserve pass-through behavior when the processor observes but does not
+  mutate the body.
+- Reuse the single-owner exchange model without adding per-request worker
+  tasks, unbounded queues, or shared stream locks.
+
+### PR 9: Request and Response Trailers
+
+**Status:** Planned; platform-boundary discovery required
+
+**Scope:**
+- Add trailer processing only where Pingora exposes a safe lifecycle hook.
+- Keep request trailers and response trailers separate if the platform support
+  differs.
+- Document unsupported phases explicitly rather than silently claiming Envoy
+  parity.
+
+### PR 10: Processing-Mode Override Matrix
+
+**Status:** Planned after lifecycle phases are explicit
+
+**Scope:**
+- Validate mode combinations for headers, body, trailers, and response phases.
+- Implement supported processor override behavior.
+- Reject or ignore unsupported overrides with deterministic tests and docs.
+
+### PR 11: Mutation and Forwarding Rules
+
+**Status:** Planned
+
+**Scope:**
+- Add generic allow/deny mutation rules for request and response headers.
+- Define forwarding rules separately from mutation rules.
+- Keep authority/host protection generic.
+- Avoid llm-d-specific header shortcuts.
+
+### PR 12: Metadata Options and Attributes
+
+**Status:** Planned
+
+**Scope:**
+- Define which request, route, upstream, and filter-state attributes Praxis can
+  expose to an external processor.
+- Decide which data travels as headers, structured metadata, gRPC metadata, or
+  explicit protobuf fields.
+- Keep the contract documented so llm-d and non-llm-d processors can rely on it.
+
+### PR 13: Failure, Per-Route, and Processor-Target Overrides
+
+**Status:** Planned
+
+**Scope:**
+- Add per-route and per-filter overrides for processor target, failure behavior,
+  status codes, and timeouts.
+- Preserve fail-closed request-routing semantics where required by
+  `endpoint_selector`.
+- Keep override precedence deterministic and tested.
+
+### PR 14: Observability Mode
+
+**Status:** Planned
+
+**Scope:**
+- Support observe-only processor flows without applying mutations.
+- Ensure observability cannot accidentally select an upstream or alter the
+  request/response.
+- Add stats/logging hooks that distinguish observation from mutation.
+
+### PR 15: Fuller Immediate-Response Parity
+
+**Status:** Planned
+
+**Scope:**
+- Expand direct-response behavior beyond the minimal terminal response path
+  covered by PR3 and PR4.
+- Cover headers, body handling, metadata, and lifecycle cleanup across request
+  and response phases.
+
+### PR 16: Stats, Docs, Examples, and Conformance Hardening
+
+**Status:** Planned after the behavioral PRs
+
+**Scope:**
+- Add stable counters and traces for each lifecycle outcome.
+- Add example configs for each supported mode.
+- Add conformance-style tests for supported Envoy `ext_proc` behavior.
+- Clearly document unsupported Envoy features.
+
+### Product Routing Follow-Up
+
+**Status:** Separate from Envoy parity; driven by llm-d product semantics
+
+**Scope:**
+- Validate selected endpoints against InferencePool membership.
+- Support cluster/pool routing if product requirements need it.
+- Define fallback endpoint ordering and retry interaction.
+- Authorize model-to-pool selections.
+- Validate role-specific and named-port selections.
+
+This product-routing track should use issue #295 real-cluster evidence. It
+should not be mixed into generic Envoy `ext_proc` parity PRs unless a shared
+primitive is genuinely required.
+
+The detailed PR6+ implementation plan is captured in the companion Track B
+planning workspace as `envoy-ext-proc-parity-gameplan.md`. This spike document
+keeps the reviewer-facing scope boundary and PR sequence.
+
 ## Non-Blocking Follow-Up Work
 
 These items are useful for broader Envoy `ext_proc` parity and future llm-d
@@ -244,7 +483,7 @@ features, but they are not required for the llm-d request-routing path proven he
 
 | Item | Needed for current llm-d request routing? | Scope |
 |------|---|-------|
-| Response body streaming foundation | No | Async multi-output response body foundation for future response lifecycle work. |
+| Response body streaming foundation | No | PR7 design-first async multi-output response body foundation for future response lifecycle work. |
 | Complete response lifecycle integration | No | Response metadata, response body processing, usage/eviction-style flows, and broader parity. |
 | Request trailers | No | Blocked on a Pingora platform boundary; not used by the current Go EPP request-routing path. |
-| Full Envoy `ext_proc` parity | No | Broader compatibility work such as response phases, mode overrides, and full mutation-rule coverage. |
+| Full Envoy `ext_proc` parity | No | PR6+ compatibility work such as response phases, mode overrides, mutation rules, metadata options, observability mode, and conformance hardening. |
