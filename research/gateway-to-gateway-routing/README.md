@@ -13,7 +13,7 @@ issue is [#690](https://github.com/praxis-proxy/praxis/issues/690); related
 scope boundaries include the policy epic [#678](https://github.com/praxis-proxy/praxis/issues/678)
 and the llm-d epic [#16](https://github.com/praxis-proxy/praxis/issues/16).
 
-## Layperson summary
+## Summary
 
 Epic 664 is about making Praxis gateways talk to each other safely.
 
@@ -73,22 +73,7 @@ gateway cluster to use, while preserving strict trust boundaries.
    three-gateway demo.
 7. Define the local snapshot contract the AI Grid Operator will publish.
 
-## Rust implementation principles
-
-The implementation should follow these rules in addition to
-`praxis/docs/developing/conventions.md`.
-
-| Principle | Practical rule for Epic 664 |
-| --- | --- |
-| Make invalid states unrepresentable | Use enums for fixed concepts like capability kind, backend class, trust mode, and stale-data behavior. Avoid free-form strings where a finite set exists. |
-| Validate at parse/update time | Config and site descriptors should use `#[serde(deny_unknown_fields)]`, bounded strings, bounded vectors, and explicit freshness/expiry validation. |
-| Read-mostly state should be atomic snapshots | Store route state as `Arc<RoutingSnapshot>` behind `ArcSwap` or an equivalent existing snapshot holder. Request handling reads one immutable snapshot. |
-| No locks across `.await` | Scoring should be pure synchronous logic over an immutable snapshot. Any I/O needed to refresh state belongs in a background task or operator path. |
-| Keep dependencies light | `arc-swap`, `serde`, `tracing`, `thiserror`, `rustls`, and existing workspace crates are enough for the first implementation. |
-| Log decisions, not secrets or prompts | Trace route candidate counts, selected site, capability ID, snapshot generation, and stale/fallback reason. Never log API keys or full request bodies. |
-| Fail closed at trust and policy boundaries | Unknown peer identity, invalid internal headers, stale required policy, and untrusted route mutations must reject. Capacity uncertainty can fall back only when explicitly configured. |
-
-## Chosen implementation approach
+## Possible implementation approach
 
 Gateway-to-gateway routing should use a typed `grid_route` filter backed by an
 immutable local `RoutingSnapshot`, while reusing existing Praxis clusters and
