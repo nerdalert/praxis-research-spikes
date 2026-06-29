@@ -30,6 +30,8 @@ large-prompt body handling, GuideLLM simulator echo, and analysis.
 
 Validation workspace for the gateway-to-gateway connectivity, metadata, and
 routing epic. Proves the full three-gateway path before upstream PRs are split.
+Uses the Praxis POC branch
+[`nerdalert/praxis:praxis-multi-cluster-poc-v1`](https://github.com/nerdalert/praxis/tree/praxis-multi-cluster-poc-v1).
 
 ---
 

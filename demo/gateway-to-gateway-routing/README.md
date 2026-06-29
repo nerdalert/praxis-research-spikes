@@ -16,6 +16,13 @@ Praxis gateway. The first gateway chooses a local or remote capability. The
 remote gateway proves who it is with mutual TLS, validates the request came from
 a trusted peer, then forwards to its own local backend.
 
+## Source branches
+
+| Source | Reference |
+| --- | --- |
+| Praxis POC implementation | [`nerdalert/praxis:praxis-multi-cluster-poc-v1`](https://github.com/nerdalert/praxis/tree/praxis-multi-cluster-poc-v1) |
+| Spike demo package | [`nerdalert/praxis-research-spikes:main`](https://github.com/nerdalert/praxis-research-spikes/tree/main/demo/gateway-to-gateway-routing) |
+
 ## What the E2E proves
 
 | Proof point | Evidence |

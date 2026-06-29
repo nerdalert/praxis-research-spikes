@@ -112,7 +112,7 @@ control-plane work may update snapshots in the background.
 | Source | Reference |
 | --- | --- |
 | Praxis POC branch | https://github.com/nerdalert/praxis/tree/praxis-multi-cluster-poc-v1 |
-| Spike demo branch | https://github.com/nerdalert/praxis-research-spikes/tree/codex/gateway-to-gateway-demo |
+| Spike demo package | https://github.com/nerdalert/praxis-research-spikes/tree/main/demo/gateway-to-gateway-routing |
 
 ## Presenter guide
 
