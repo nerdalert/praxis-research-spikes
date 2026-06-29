@@ -1,20 +1,25 @@
-# Gateway-to-gateway E2E extraction map
+# Gateway-to-gateway upstream PR stack
 
 The E2E may be implemented as a single validation branch first. After the demo
 passes, split the work into upstream PR-sized changes using this map.
 
-## Candidate upstream PR stack
+This is the tracked, public PR-stack source for the spike. Local/private task
+drafts can exist outside this repo, but this document must be sufficient for a
+future maintainer to understand the planned PR boundaries, evidence, required
+tests, and known caveats.
 
-| Target | Purpose | E2E evidence to extract | Production prompt status |
+## Candidate PR stack
+
+| Target | Purpose | E2E evidence to extract | Upstream readiness |
 | --- | --- | --- | --- |
-| G2G-01 peer identity | Expose verified downstream mTLS peer identity to HTTP filters. | `TlsPeerIdentity` populated from `SslDigest` in `request_filter/mod.rs`; `grid_ingress_trust` reads `ctx.peer_identity` to accept/reject. E2E assertions 15-18 prove trusted/untrusted org matching. | **Validated by G2G-E2E-02.** Production prompt drafted in `claude-code-prompts.md`. Files: `filter/src/context.rs`, `protocol/src/http/pingora/context.rs`, `protocol/src/http/pingora/handler/request_filter/mod.rs`. |
-| G2G-02 ingress trust | Validate trusted peer identity on grid ingress; reject missing or untrusted peers. | `grid_ingress_trust` filter rejects CA-valid cert with wrong org (403). Unknown-CA cert is rejected by mTLS. Trusted org accepted. Config rejects empty trusted_peers and empty match fields at parse time. E2E assertions 17-20. | **Validated by G2G-E2E-02.** Production prompt drafted in `claude-code-prompts.md`. Files: `filter/src/builtins/http/security/grid_ingress_trust.rs`, `filter/src/registry.rs`. 10 unit tests. |
-| G2G-03 site descriptor model | Add typed local site/capability/freshness route state. | Static candidate config with model/site/cluster validated at parse time. Empty/blank fields, duplicate models, oversized names, and reserved model_header prefixes are rejected. E2E assertions 22-25 prove local, remote-b, remote-c, and unknown model routing. | **Validated by G2G-E2E-03.** Production prompt drafted in `claude-code-prompts.md`. Files: `filter/src/builtins/http/ai/grid/route.rs` (config types). 9 config validation tests. |
-| G2G-04 route filter | Select local or remote gateway cluster from request facts and descriptors. | `grid_route` reads X-Model header, sets `ctx.cluster` to selected cluster, rejects invalid/oversized model header values without unbounded metadata, and never uses reserved internal headers as route authority. Router preserves prior cluster selection. 17 unit tests + router preservation test. | **Validated by G2G-E2E-03.** Production prompt drafted in `claude-code-prompts.md`. Files: `filter/src/builtins/http/ai/grid/route.rs`, `filter/src/builtins/http/traffic_management/router/mod.rs`. |
-| G2G-05 remote forwarding metadata | Add bounded internal metadata for gateway-to-gateway hops. | Route decision metadata written to `ctx.filter_metadata` with bounded keys/values. No request-header-based forwarding metadata in this POC. | **Partially validated by G2G-E2E-03** (metadata only; header forwarding deferred). Design-sensitive production prompt drafted in `claude-code-prompts.md`. |
-| G2G-06 scoring/freshness | Prefer fresh/local/higher-score candidates deterministically. | `CapabilityKind` enum controls matching. Fresh candidates score 0, stale -100. Local preference +10. E2E assertion 27 proves fresh remote beats stale remote independent of local preference; assertion 28 proves local preference when otherwise equal. 21 unit tests including scoring. | **Validated by G2G-E2E-04.** Production prompt drafted in `claude-code-prompts.md`. File: `filter/src/builtins/http/ai/grid/route.rs`. |
-| G2G-07 MCP/A2A routing | Extend route candidate extraction to existing MCP/A2A metadata. | MCP `tools/call` routes cross gateway boundary via `mcp.name` filter metadata. E2E assertion 29 proves tool routes to site-c through mTLS. A2A deferred (1 SKIP). | **MCP validated by G2G-E2E-04.** Production prompt drafted in `claude-code-prompts.md`. A2A deferred. File: `filter/src/builtins/http/ai/grid/route.rs`. |
-| G2G-08 examples and docs | Add public examples, generated docs, and integration tests. | Demo configs become minimal upstream examples after POC-only code is removed. | **Planned by G2G-E2E-05.** Production prompt drafted in `claude-code-prompts.md`. |
+| G2G-01 peer identity | Expose verified downstream mTLS peer identity to HTTP filters. | `TlsPeerIdentity` populated from `SslDigest` in `request_filter/mod.rs`; `grid_ingress_trust` reads `ctx.peer_identity` to accept/reject. E2E assertions 15-18 prove trusted/untrusted org matching. | **Validated by G2G-E2E-02.** Files: `filter/src/context.rs`, `protocol/src/http/pingora/context.rs`, `protocol/src/http/pingora/handler/request_filter/mod.rs`. |
+| G2G-02 ingress trust | Validate trusted peer identity on grid ingress; reject missing or untrusted peers. | `grid_ingress_trust` filter rejects CA-valid cert with wrong org (403). Unknown-CA cert is rejected by mTLS. Trusted org accepted. Config rejects empty trusted_peers and empty match fields at parse time. E2E assertions 17-20. | **Validated by G2G-E2E-02.** Files: `filter/src/builtins/http/security/grid_ingress_trust.rs`, `filter/src/registry.rs`. Requires unit and mTLS integration/example coverage. |
+| G2G-03 site descriptor model | Add typed local site/capability/freshness route state. | Static candidate config with model/site/cluster validated at parse time. Empty/blank fields, duplicate models, oversized names, and reserved model_header prefixes are rejected. E2E assertions 22-25 prove local, remote-b, remote-c, and unknown model routing. | **Validated by G2G-E2E-03.** Files: `filter/src/builtins/http/ai/grid/descriptor.rs` and related module wiring. |
+| G2G-04 route filter | Select local or remote gateway cluster from request facts and descriptors. | `grid_route` reads X-Model header, sets `ctx.cluster` to selected cluster, rejects invalid/oversized model header values without unbounded metadata, and never uses reserved internal headers as route authority. Router preserves prior cluster selection. 17 unit tests + router preservation test. | **Validated by G2G-E2E-03.** Files: `filter/src/builtins/http/ai/grid/route.rs`, `filter/src/builtins/http/traffic_management/router/mod.rs`. Requires integration/example coverage before upstreaming. |
+| G2G-05 remote forwarding metadata | Add bounded internal metadata for gateway-to-gateway hops. | Route decision metadata written to `ctx.filter_metadata` with bounded keys/values. No request-header-based forwarding metadata in this POC. | **Partially validated by G2G-E2E-03** (metadata only; header forwarding deferred). Design-sensitive; define contract before code. |
+| G2G-06 scoring/freshness | Prefer fresh/local/higher-score candidates deterministically. | `CapabilityKind` enum controls matching. Fresh candidates score 0, stale -100. Local preference +10. E2E assertion 27 proves fresh remote beats stale remote independent of local preference; assertion 28 proves local preference when otherwise equal. 21 unit tests including scoring. | **Validated by G2G-E2E-04.** File: `filter/src/builtins/http/ai/grid/route.rs`. |
+| G2G-07 MCP/A2A routing | Extend route candidate extraction to existing MCP/A2A metadata. | MCP `tools/call` routes cross gateway boundary via `mcp.name` filter metadata. E2E assertion 29 proves tool routes to site-c through mTLS. A2A deferred because it needs separate route-key semantics, session/task expectations, and explicit A2A gateway tests. | **MCP validated by G2G-E2E-04.** A2A deferred for a follow-up after those semantics/tests are defined. File: `filter/src/builtins/http/ai/grid/route.rs`. |
+| G2G-08 examples and docs | Add public examples, generated docs, and integration tests. | Demo configs become minimal upstream examples after POC-only code is removed. | **Required before upstream acceptance.** Converts demo evidence into user-facing docs and integration/example coverage. |
 
 ## Extraction note template
 
@@ -33,10 +38,11 @@ Security or correctness pitfalls:
 Open questions:
 ```
 
-## Production prompt template
+## Implementation task template
 
-After each E2E step validates, add a production prompt to
-`claude-code-prompts.md` using this shape:
+When creating an implementation task from this stack, use this shape. The task
+draft can live in a local/private file, but the tracked spike docs must retain
+the evidence, scope, tests, and caveats.
 
 ```text
 ## UP-G2G-XX — short upstreamable title
@@ -226,9 +232,9 @@ Each upstream target with copy/paste-friendly extraction guidance.
 - **Security pitfalls found during E2E:** Tool names must be validated and bounded
 - **Docs/config examples needed:** MCP routing config, tool capability examples
 - **Dependencies on previous PRs:** UP-G2G-04 (requires route filter), existing MCP filter support
-- **Explicit non-goals:** A2A routing, MCP server discovery
+- **Explicit non-goals:** A2A routing until explicit route-key semantics and gateway tests are defined; MCP server discovery
 
-**Breakout sentence:** Break this out as MCP-specific route extraction using existing MCP/JSON-RPC metadata; do not claim A2A support.
+**Breakout sentence:** Break this out as MCP-specific route extraction using existing MCP/JSON-RPC metadata; do not claim A2A support until separate A2A route semantics and tests exist.
 
 ### UP-G2G-08: examples/docs/tests
 

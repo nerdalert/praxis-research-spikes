@@ -87,7 +87,9 @@ Site A is not a free pass into Site B or Site C.
 - No global membership, SWIM, gossip, CRDT replication, or operator behavior.
 - No external provider fallback or credential sharing.
 - No production policy engine or llm-d worker scheduling.
-- No A2A routing (deferred).
+- No A2A routing (deferred because the spike validated MCP tool metadata first;
+  A2A needs separate route-key semantics and explicit A2A gateway tests before
+  it should be claimed).
 - No claim that POC code is PR-ready.
 
 ## Prerequisites
@@ -184,8 +186,8 @@ a grid listener (mTLS). Sites B and C have grid listeners only.
 
 ## Upstream PR stack
 
-See [pr-extraction-map.md](pr-extraction-map.md) for the complete extraction
-plan. Claude prompt drafts are intentionally kept local/private and are not
+See [upstream-pr-stack.md](upstream-pr-stack.md) for the complete extraction
+plan. Implementation task drafts are intentionally kept local/private and are not
 tracked in this public spike package.
 
 | Target | Status |
@@ -196,8 +198,8 @@ tracked in this public spike package.
 | G2G-04 route filter | Validated (E2E-03) |
 | G2G-05 forwarding metadata | Partially validated (E2E-03, metadata only) |
 | G2G-06 scoring/freshness | Validated (E2E-04) |
-| G2G-07 MCP routing | Validated (E2E-04, MCP only; A2A deferred) |
-| G2G-08 examples and docs | Planned; prompt ready (E2E-05) |
+| G2G-07 MCP routing | Validated (E2E-04, MCP only; A2A deferred pending explicit A2A route semantics/tests) |
+| G2G-08 examples and docs | Planned; stack entry ready (E2E-05) |
 
 ## Files in this directory
 
@@ -208,10 +210,10 @@ tracked in this public spike package.
 | [implementation-notes.md](implementation-notes.md) | Detailed implementation notes and E2E results by task. |
 | [demo-narrative.md](demo-narrative.md) | Presenter script and plain-language demo walkthrough. |
 | [run-complete-e2e-demo.sh](run-complete-e2e-demo.sh) | Generates a Markdown command/output transcript for the full demo. |
-| [pr-extraction-map.md](pr-extraction-map.md) | Upstream PR split with evidence references. |
-| [pr-stack-documentation-plan.md](pr-stack-documentation-plan.md) | Documentation contract between Claude and Codex. |
+| [upstream-pr-stack.md](upstream-pr-stack.md) | Upstream PR split with evidence references. |
+| [pr-stack-documentation-plan.md](pr-stack-documentation-plan.md) | Documentation contract for E2E validation and upstream PR extraction. |
 | [sample-output.md](sample-output.md) | Sanitized demo output. |
 | `configs/` | Praxis YAML configs for three gateways. |
 | `scripts/` | Demo lifecycle scripts. |
 | `mocks/` | Python mock backends for inference, MCP, and A2A. |
-| `.gitignore` | Excludes generated certs/logs/PIDs and local-only Claude prompt drafts. |
+| `.gitignore` | Excludes generated certs/logs/PIDs and local-only implementation task drafts. |

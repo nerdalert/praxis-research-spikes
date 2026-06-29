@@ -3,7 +3,7 @@
 Presenter script for the Praxis gateway-to-gateway E2E spike.
 
 This is the demo story. The technical proof lives in `scripts/run-demo.sh`,
-`sample-output.md`, `architecture.md`, and `pr-extraction-map.md`.
+`sample-output.md`, `architecture.md`, and `upstream-pr-stack.md`.
 
 ## Demo intent
 
@@ -319,8 +319,9 @@ Say:
 
 ```text
 This skip is intentional. The epic includes agent traffic, but the validated
-slice is MCP first. A2A should not be claimed until we have explicit A2A route
-tests.
+slice is MCP first. A2A needs separate route-key semantics, session/task
+handling expectations, and explicit A2A gateway tests before it should be
+claimed.
 ```
 
 ## Final expected output
@@ -342,7 +343,7 @@ Interpretation:
 | --- | --- |
 | 29 pass | Implemented G2G trust/routing/scoring/MCP assertions passed. |
 | 0 fail | No implemented behavior regressed. |
-| 1 skip | A2A route validation is still deferred. |
+| 1 skip | A2A route validation is still deferred pending explicit A2A route semantics and tests. |
 
 ## What the demo proves
 
@@ -369,7 +370,7 @@ Do not overclaim these:
 | Production policy engine | No deny-by-default tenant/agent policy engine yet. |
 | llm-d worker scheduling | Mocks replace GPU workers and Endpoint Picker integration. |
 | External provider fallback | Not in this demo. |
-| A2A routing | Explicitly skipped. |
+| A2A routing | Explicitly skipped until route-key semantics, session/task expectations, and gateway tests are defined. |
 | Final forwarding metadata contract | Only bounded filter metadata is partially validated. |
 
 ## How to answer likely questions
@@ -448,11 +449,14 @@ Not implemented yet: 1
 RESULT: PASS
 ```
 
-The single SKIP is A2A routing (intentionally deferred).
+The single SKIP is A2A routing (intentionally deferred because MCP route
+metadata was validated first and A2A still needs explicit route semantics and
+tests).
 
 **What not to claim:**
 
-- A2A routing is not implemented.
+- A2A routing is not implemented; it remains deferred until explicit A2A route
+  semantics and gateway tests are defined.
 - No Operator, SWIM, CRDT, or gossip is implemented.
 - No request-time database or control-plane query.
 - Freshness is static `true`/`false`, not timestamped.

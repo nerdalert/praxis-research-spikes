@@ -7,30 +7,29 @@ time to create upstream Praxis PRs for
 
 ## Plain-language summary
 
-Claude can build the E2E quickly, but every step must leave a clean trail:
+The E2E can move quickly, but every step must leave a clean trail:
 what changed, what was proven, what belongs in production, what was only a demo
-shortcut, and which future PR should own the work. Codex reviews that trail
-after each step and tightens the next prompt before more code is added.
+shortcut, and which future PR should own the work. A reviewer checks that trail
+after each step before more code is added.
 
 ## Working agreement
 
 | Role | Responsibility | Output |
 | --- | --- | --- |
-| Claude Code | Implement the current E2E task and document the exact behavior validated. | Handoff report, updated demo docs, extraction notes, refined upstream prompts. |
-| Codex | Review Claude's changes for architecture fit, PR boundaries, security issues, and missing evidence. | Review notes, corrected follow-up prompts, decision on whether the next E2E step is ready. |
-| Future upstream PR author | Use the validated production prompts, not the monolithic E2E branch, as the source of truth. | Small Praxis PRs with tests, docs, and clear non-goals. |
+| Implementation agent | Implement the current E2E task and document the exact behavior validated. | Handoff report, updated demo docs, extraction notes, and local task drafts if needed. |
+| Reviewer | Review changes for architecture fit, PR boundaries, security issues, and missing evidence. | Review notes, corrected follow-up tasks, decision on whether the next E2E step is ready. |
+| Future upstream PR author | Use this tracked PR stack and validated evidence, not the monolithic E2E branch, as the source of truth. | Small Praxis PRs with tests, docs, and clear non-goals. |
 
 ## Required documentation after every E2E task
 
-Claude must update the demo docs before handing work back to Codex.
+Each implementation pass must update the demo docs before review.
 
 | Artifact | Required update | Why it matters later |
 | --- | --- | --- |
 | `implementation-notes.md` | Add actual files/functions touched, behavior added, and any design changes from the original plan. | Captures the real implementation path, not the guessed one. |
-| `pr-extraction-map.md` | Mark affected G2G targets with evidence, likely upstream files, and current prompt status. | Keeps the future PR stack aligned with validated behavior. |
-| `claude-code-prompts.md` | Refine the next E2E prompt and add or update any validated production prompts. | Prevents repeating E2E mistakes when implementing upstream PRs. |
+| `upstream-pr-stack.md` | Mark affected G2G targets with evidence, likely upstream files, and readiness status. | Keeps the future PR stack aligned with validated behavior. |
 | `sample-output.md` | Add sanitized command output once a demo assertion passes. | Gives future PRs concrete acceptance evidence. |
-| Handoff report | List changed files, validation commands, failed commands, blockers, and open questions. | Gives Codex enough context to review without rediscovering basics. |
+| Handoff report | List changed files, validation commands, failed commands, blockers, and open questions. | Gives the reviewer enough context to review without rediscovering basics. |
 
 `sample-output.md` can stay absent until there is passing demo output worth
 preserving. Once created, it should contain only sanitized logs and responses.
@@ -52,24 +51,24 @@ Security or correctness pitfalls:
 Open questions:
 ```
 
-## Codex review checklist
+## Review checklist
 
-Codex should not approve moving to the next E2E step until these checks are
-answered.
+The reviewer should not approve moving to the next E2E step until these checks
+are answered.
 
 | Check | Pass condition |
 | --- | --- |
 | Scope | The task stayed inside the current E2E step and did not implement later targets accidentally. |
 | Trust boundary | Client-controlled data is not treated as gateway authority. |
 | PR split clarity | Each new behavior maps to one or more G2G targets with a clear upstream owner. |
-| POC shortcut labeling | Demo-only shortcuts are explicitly named and blocked from production prompts. |
+| POC shortcut labeling | Demo-only shortcuts are explicitly named and blocked from implementation tasks. |
 | Tests | Positive and negative assertions are documented, not just happy-path output. |
-| Docs | Prompt refinements include exact files/functions, commands, and pitfalls found. |
+| Docs | Task refinements include exact files/functions, commands, and pitfalls found. |
 | Reproducibility | A future engineer can rerun or inspect the evidence without hidden state. |
 
-## Test expectations for Claude
+## Test expectations for implementation passes
 
-Every Claude implementation task must run tests before handoff. The minimum
+Every implementation task must run tests before handoff. The minimum
 depends on what changed.
 
 | Change type | Required validation |
@@ -77,17 +76,17 @@ depends on what changed.
 | Demo docs/scripts/configs only | Run the relevant demo scripts, `git diff --check`, and any shell/config validation available. Explain why Rust tests are not applicable. |
 | Praxis Rust code | Run focused unit tests for touched modules, full package tests for touched crates, `make lint`, `cargo clippy --workspace --all-targets -- -D warnings`, and `git diff --check`. |
 | Praxis config examples/docs generated from code | Run the relevant example integration test, generated-doc sync/lint command, `make lint`, and `git diff --check`. |
-| Protocol, TLS, trust, routing, or concurrency changes | Run positive and negative tests, including adversarial/failure-mode tests. Add or update integration tests unless Codex explicitly accepts a narrower reason. |
+| Protocol, TLS, trust, routing, or concurrency changes | Run positive and negative tests, including adversarial/failure-mode tests. Add or update integration tests unless the reviewer explicitly accepts a narrower reason. |
 
 Skipping tests is allowed only when the task is genuinely docs/demo-only or an
-environmental blocker prevents execution. In either case, Claude must provide
+environmental blocker prevents execution. In either case, the implementer must provide
 the exact command, output, and reason. “No code changed” is sufficient only for
 Rust tests when the diff contains no Praxis Rust code.
 
 ## Strict review standard
 
-Use this standard when Codex reviews each Claude handoff and when creating
-prompts for Claude to self-check work before handing it back.
+Use this standard when reviewing each handoff and when creating local task
+drafts for self-checking work before handoff.
 
 ```text
 Review this PR like a strict GitHub code-review bot and senior maintainer.
@@ -139,12 +138,12 @@ For the E2E worktree, the conventions document is expected at:
 /home/ubuntu/praxxis/ai-grid/prs/gateway-to-gateway-e2e/praxis/docs/developing/conventions.md
 ```
 
-## Production prompt quality bar
+## Implementation task quality bar
 
-Every upstream prompt created from the E2E must be small enough to become one
-reviewable PR. If the prompt naturally asks for multiple behaviors, split it.
+Every upstream task created from the E2E must be small enough to become one
+reviewable PR. If the task naturally asks for multiple behaviors, split it.
 
-Each production prompt must include:
+Each implementation task must include:
 
 1. the exact upstream behavior to implement;
 2. the E2E assertion that validated the behavior;
@@ -165,8 +164,8 @@ Each production prompt must include:
 | After G2G-E2E-01 | Harness, configs, mocks, cert generation, cleanup, and current expected failures are documented. | Ready to implement POC trust behavior. |
 | After G2G-E2E-02 | Peer identity and header-protection behavior have evidence and split cleanly into G2G-01/G2G-02. | Ready to implement route-state and inference routing. |
 | After G2G-E2E-03 | Static site descriptors, route selection, and forwarding metadata have evidence and split cleanly into G2G-03/G2G-04/G2G-05. | Ready to add scoring and agent-shaped routing. |
-| After G2G-E2E-04 | Freshness/locality scoring and MCP/A2A routing have evidence and split cleanly into G2G-06/G2G-07. | Ready for final demo cleanup. |
-| After G2G-E2E-05 | Final sample output, extraction map, and production prompts are complete. | Ready to start upstream PR stack. |
+| After G2G-E2E-04 | Freshness/locality scoring and MCP routing have evidence and split cleanly into G2G-06/G2G-07; A2A remains explicitly deferred pending route-key semantics and gateway tests. | Ready for final demo cleanup. |
+| After G2G-E2E-05 | Final sample output, upstream PR stack, and local task drafts are complete. | Ready to start upstream PR stack. |
 
 ## Rules for avoiding PR-stack drift
 
@@ -175,7 +174,7 @@ Each production prompt must include:
 - Do not carry demo scripts or mock servers into Praxis unless they are
   converted into normal examples or tests.
 - Do not mix peer identity, ingress trust, route selection, scoring, and
-  agent protocol support in one upstream PR unless Codex explicitly approves a
+  agent protocol support in one upstream PR unless the reviewer explicitly approves a
   combined boundary.
-- Do not write production prompts that ask Claude to "make it like the E2E";
+- Do not write implementation tasks that ask an implementer to "make it like the E2E";
   name the specific behavior, files, tests, and non-goals.

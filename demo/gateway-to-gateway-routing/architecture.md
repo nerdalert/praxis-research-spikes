@@ -4,7 +4,8 @@
 
 Build the smallest useful three-gateway validation for Epic #664:
 gateway-to-gateway connectivity, peer trust, site metadata, and cross-gateway
-inference/agent routing.
+inference/tool routing. A2A is represented by mocks only and remains deferred
+until explicit A2A route-key semantics and gateway tests are defined.
 
 This E2E is deliberately a prerequisite validation. It is not the final PR
 stack. It is the evidence used to decide the PR stack.
@@ -61,7 +62,7 @@ stack. It is the evidence used to decide the PR stack.
 | Spoofed internal header | Public request includes gateway route headers | Header ignored/stripped; route still follows trusted metadata |
 | Missing mTLS | Client calls site B grid listener directly without cert | Rejected during TLS or ingress trust validation |
 | MCP tool | JSON-RPC/MCP request for a site C tool | site A → mTLS → site C → tool mock |
-| A2A agent | A2A request for a site B agent | site A → mTLS → site B → agent mock |
+| A2A agent | A2A request for a site B agent | Deferred; mocks exist, but cross-gateway A2A routing is not claimed until route-key/session semantics and tests exist. |
 
 ## Suggested implementation shape
 

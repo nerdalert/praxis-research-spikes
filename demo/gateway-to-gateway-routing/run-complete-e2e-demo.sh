@@ -146,7 +146,9 @@ RESULT: PASS (all implemented assertions passed)
 ```
 
 The single expected skip is A2A gateway routing. It is intentionally deferred
-and must not be claimed as implemented.
+because MCP route metadata was validated first, while A2A still needs explicit
+route-key semantics, session/task expectations, and gateway tests. It must not
+be claimed as implemented.
 EOF
 
 echo "Transcript written to: $OUT"

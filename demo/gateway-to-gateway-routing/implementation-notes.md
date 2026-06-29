@@ -298,7 +298,7 @@ initial demo).
 2. The existing `router` filter remains in the pipeline as a
    fallback and for path-based routing within a site. The
    `grid_route` filter runs first and may set `ctx.cluster`
-   before the router executes. Codex review correction: the current
+   before the router executes. Review correction: the current
    router does not skip when `ctx.cluster` is already set, so the POC
    must either add explicit router skip behavior or branch around the
    router after `grid_route` selects a cluster.
@@ -449,7 +449,7 @@ surviving a normal upstream hop without changing that behavior explicitly.
 The existing `router` filter sets `ctx.cluster` based on path/host
 matching. The `grid_route` filter also needs to set `ctx.cluster`.
 
-Codex review correction: in the current E2E worktree, the router does not skip
+Review correction: in the current E2E worktree, the router does not skip
 when `ctx.cluster` is already set. It matches path/host and writes
 `ctx.cluster` again. Do not rely on the original G2G-E2E-00 assumption that
 router already has this guard.
@@ -470,7 +470,7 @@ Options:
 E2E should make this conflict visible in G2G-E2E-03 and map the chosen fix to
 the G2G-04 route-filter PR.
 
-## Extraction targets from pr-extraction-map.md
+## Extraction targets from upstream-pr-stack.md
 
 | Target | E2E phase | Key files to touch | Upstream priority |
 | --- | --- | --- | --- |
@@ -857,7 +857,7 @@ Open questions:
 | Local site preference | +10 |
 | Tie-break | First configured candidate wins (explicit loop in `select()`) |
 
-### Codex review fixes applied
+### Review fixes applied
 
 1. **Deterministic tie-break**: `select()` uses explicit loop returning first
    highest-scored candidate instead of `max_by_key` (which returns last equal).
@@ -885,7 +885,7 @@ Open questions:
 ### Extraction notes
 
 ```text
-Extraction target: G2G-06 scoring + G2G-07 MCP/A2A routing
+Extraction target: G2G-06 scoring + G2G-07 MCP routing; A2A deferred
 Validated behavior:
   - CapabilityKind enum (inference_model, mcp_tool) controls matching
   - Fresh candidates deterministically beat stale candidates
@@ -900,7 +900,8 @@ Likely upstream files: same
 POC-only shortcuts:
   - Static fresh: true/false (no timestamp or TTL)
   - MCP matching only reads mcp.name for tools/call (no other methods)
-  - A2A routing deferred (1 SKIP remaining)
+  - A2A routing deferred because it needs explicit route-key semantics,
+    session/task expectations, and gateway tests
   - on_invalid: continue required for mixed-traffic listeners
 Required upstream tests:
   - Scoring: fresh beats stale, local preference, deterministic tie-break
@@ -914,5 +915,5 @@ Security or correctness pitfalls:
     listeners must configure on_invalid: continue
 Open questions:
   - Should upstream scoring use timestamps instead of boolean freshness?
-  - Should A2A be in the same PR as MCP, or a separate G2G-07 follow-up?
+  - Which A2A route keys and session/task semantics should a follow-up use?
 ```
