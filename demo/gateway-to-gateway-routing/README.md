@@ -84,6 +84,9 @@ bash scripts/generate-certs.sh
 # Run the full demo (starts mocks, gateways, assertions, cleanup)
 bash scripts/run-demo.sh
 
+# Generate a narrative command/output transcript
+bash run-complete-e2e-demo.sh
+
 # Manual cleanup if needed
 bash scripts/cleanup.sh
 ```
@@ -99,6 +102,10 @@ PRAXIS_BIN=/path/to/praxis bash scripts/run-demo.sh
 Use [demo-narrative.md](demo-narrative.md) as the presenter script. It explains
 the architecture in plain language, walks through each assertion group, calls
 out what the demo proves, and lists what should not be claimed yet.
+
+Use [run-complete-e2e-demo.sh](run-complete-e2e-demo.sh) to generate a
+Markdown transcript with the command sequence, narrative context, and full
+assertion output. The default output is `demo-output.md`.
 
 Workflow rule: do not commit, push, or open upstream Praxis PRs from this work
 until the spike demo evidence and narrative have been reviewed and explicitly
@@ -150,6 +157,7 @@ plan. Production prompts for each upstream PR are in
 | [architecture.md](architecture.md) | E2E topology, trust boundaries, and route scenarios. |
 | [implementation-notes.md](implementation-notes.md) | Detailed implementation notes and E2E results by task. |
 | [demo-narrative.md](demo-narrative.md) | Presenter script and plain-language demo walkthrough. |
+| [run-complete-e2e-demo.sh](run-complete-e2e-demo.sh) | Generates a Markdown command/output transcript for the full demo. |
 | [pr-extraction-map.md](pr-extraction-map.md) | Upstream PR split with evidence references. |
 | [pr-stack-documentation-plan.md](pr-stack-documentation-plan.md) | Documentation contract between Claude and Codex. |
 | [claude-code-prompts.md](claude-code-prompts.md) | E2E task prompts and validated production prompts. |
