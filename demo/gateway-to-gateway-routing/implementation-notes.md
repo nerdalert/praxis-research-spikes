@@ -12,6 +12,39 @@
 
 **Note:** Production extraction remains future work. This branch contains POC-quality implementation for demo validation only.
 
+## Chosen architecture
+
+Gateway-to-gateway routing uses a typed `grid_route` filter backed by an
+immutable local routing snapshot. The filter chooses a Praxis cluster by
+setting `ctx.cluster`; existing Praxis clusters, load balancing, timeouts, TLS,
+and mTLS handle the connection to a local backend or remote gateway.
+
+The AI Grid Operator is the production owner of snapshot updates. It renders
+or publishes validated gateway-local state outside the request path. Praxis
+does not query the Operator, Kubernetes, SWIM/CRDT, metrics, or a database
+while a client request is waiting.
+
+## Snapshot model and fault tolerance
+
+The demo is masterless: there is no master node, leader election, or central
+coordinator in the request path. Each gateway makes routing decisions from its
+own local config.
+
+The demo is **not dynamically fault tolerant**. It uses static config with
+static candidate snapshots. If a configured target site goes down, the origin
+gateway continues attempting that route until the config is updated. The
+`fresh: true/false` field is a static POC signal that demonstrates scoring
+behavior but is not automatically updated by health or liveness signals.
+
+Dynamic fault tolerance belongs in the AI Grid Operator, which will render and
+publish updated gateway snapshots outside the request path. The Operator may
+consume Kubernetes resource watches, SWIM/CRDT membership state, and metrics
+summaries — those are Operator inputs, not Praxis request-path dependencies.
+
+When config changes, Praxis hot-reloads atomically (file watcher, 500ms
+debounce). New requests use the new config; in-flight requests finish on
+the previous pipeline.
+
 ## E2E architecture
 
 ### Process topology
@@ -170,18 +203,13 @@ Listens for `POST /a2a`. Reads the JSON-RPC body. Returns:
 }
 ```
 
-### Implementation options
+### Mock server choice
 
-| Option | Pros | Cons |
-| --- | --- | --- |
-| Shell scripts with `python3 -m http.server` | Zero compile, fast iteration | Hard to parse JSON-RPC, no echo of route info |
-| Python Flask/FastAPI scripts | Easy JSON handling, fast iteration | Python dependency |
-| Rust test utilities (reuse `start_backend`) | Consistent with test infra, typed responses | Requires building test crate |
-| Go mock server | Already used in ext_proc demos | Separate binary |
-
-Recommended: Python scripts for the demo harness (fast iteration,
-no compile step), with the integration test variant using the Rust
-`start_backend` helpers from `tests/utils/`.
+The demo harness uses small Python scripts for mock inference, MCP, and A2A
+servers because they are fast to run, easy to inspect, and do not add another
+compiled binary to the spike. The upstream integration-test variant should use
+the Rust `start_backend` helpers from `tests/utils/` instead of carrying these
+demo-only mocks into production tests.
 
 ## Praxis config plan
 

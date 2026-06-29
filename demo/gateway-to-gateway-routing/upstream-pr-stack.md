@@ -8,6 +8,18 @@ drafts can exist outside this repo, but this document must be sufficient for a
 future maintainer to understand the planned PR boundaries, evidence, required
 tests, and known caveats.
 
+## Chosen architecture boundary
+
+The PR stack implements a typed `grid_route` filter backed by immutable local
+routing state. `grid_route` decides which existing Praxis cluster should handle
+the request; existing Praxis clusters, load balancing, timeouts, TLS, and mTLS
+perform the actual connection.
+
+The AI Grid Operator owns dynamic snapshot publication in production. The PR
+stack must not add request-time queries to the Operator, Kubernetes, SWIM/CRDT,
+metrics, or a database. Those systems may feed the Operator, but Praxis request
+handling reads the latest accepted local snapshot.
+
 ## Candidate PR stack
 
 | Target | Purpose | E2E evidence to extract | Upstream readiness |
@@ -254,6 +266,24 @@ Each upstream target with copy/paste-friendly extraction guidance.
 - **Explicit non-goals:** Demo-specific tooling, temporary validation scripts
 
 **Breakout sentence:** Break this out after behavior stabilizes; it should add user-facing examples and integration coverage without changing core behavior.
+
+## Architectural boundary: data plane vs Operator
+
+The current PR stack implements **data-plane primitives and static
+descriptors only**. It deliberately does not implement AI Grid Operator
+snapshot reconciliation, SWIM/CRDT distribution, or dynamic health-based
+candidate removal.
+
+The architecture is designed so the Operator can later publish updated
+snapshots without changing the request-path boundary. Future Operator
+work should add dynamic snapshot update and remote-site liveness while
+keeping the request handler local and synchronous.
+
+Any future fault-tolerance PR must include tests for:
+- candidate removal/stale marking by Operator-driven config update
+- failover behavior when a previously-available site becomes unavailable
+- snapshot validation rejecting invalid Operator-rendered state
+- in-flight request isolation during hot reload
 
 ## Future commit workflow
 

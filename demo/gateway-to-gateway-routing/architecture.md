@@ -66,11 +66,18 @@ stack. It is the evidence used to decide the PR stack.
 
 ## Suggested implementation shape
 
+The selected architecture is a typed `grid_route` filter backed by an
+immutable local routing snapshot. `grid_route` parses bounded request facts,
+scores validated candidates from that snapshot, and sets `ctx.cluster`.
+Existing Praxis clusters, load balancing, timeouts, TLS, and mTLS then own
+the actual connection to either a local backend or a remote gateway.
+
 The E2E branch can temporarily implement a small set of POC primitives:
 
 1. peer identity exposure from downstream mTLS;
 2. ingress trust/internal-header protection;
-3. static gateway site/capability snapshot;
+3. static gateway site/capability snapshot shaped like the future
+   Operator-rendered `RoutingSnapshot`;
 4. route selection that sets `ctx.cluster`;
 5. internal route metadata injection for gateway-to-gateway hops; and
 6. destination-side validation and local forwarding.
@@ -78,6 +85,85 @@ The E2E branch can temporarily implement a small set of POC primitives:
 Keep these implementation areas visibly separated in files and docs. The goal
 is not to make one polished mega-PR. The goal is to learn the correct seams for
 the later PR stack.
+
+## Masterless local-snapshot architecture
+
+There is no master node, leader election, central coordinator, or central
+registry in the request path. Each Praxis gateway makes routing decisions
+locally from its own validated config/snapshot.
+
+```text
+Client request
+  → local Praxis gateway
+  → parse request facts (model name, MCP tool name)
+  → read immutable local snapshot (static config today)
+  → score candidates deterministically
+  → select local or remote cluster
+  → forward via existing Praxis upstream/mTLS
+
+No request-time Operator, SWIM, Kubernetes, database, or metrics lookup.
+```
+
+In production, the **AI Grid Operator** will own dynamic snapshot updates:
+
+```text
+AI Grid Operator
+  - watches Kubernetes resources
+  - consumes SWIM/CRDT liveness summaries
+  - consumes policy and capability state
+            |
+            v
+  renders local gateway snapshot/config
+            |
+            v
+  Praxis validates + hot reloads atomically
+            |
+            v
+  New requests read latest accepted local snapshot
+  In-flight requests finish on previous snapshot
+```
+
+SWIM, CRDT, Kubernetes, and metrics are inputs the Operator may consume.
+Praxis never queries them directly during request handling.
+
+## Fault tolerance: current state vs future
+
+The demo architecture is **masterless** but is **not dynamically fault
+tolerant** yet:
+
+- The demo uses static config with static candidate snapshots.
+- If site-b is configured as the selected target and site-b goes down,
+  site-a will still try that route until the config is updated.
+- `fresh: true/false` is a static POC signal. It demonstrates scoring
+  behavior but is not automatically updated by health or liveness signals.
+- Existing Praxis cluster-level health checks and circuit breakers can
+  help for ordinary upstream endpoints, but dynamic remote-site eligibility
+  is not wired into `grid_route` yet.
+- Dynamic failover belongs in the Operator-driven snapshot update path.
+
+Avoid claiming: "fully fault tolerant," "automatic failover,"
+"self-healing," or "live liveness-based routing." The correct description
+is **fault-tolerance-ready architecture with static POC freshness signals**.
+
+## What happens when a snapshot changes
+
+Today, the snapshot is represented by static Praxis YAML config. Changing
+it means editing the config file and relying on Praxis hot reload (file
+watcher, 500ms debounce, atomic pipeline swap).
+
+In production:
+
+1. The AI Grid Operator renders a new local gateway config/snapshot.
+2. Praxis validates the new config before accepting it.
+3. If valid, Praxis atomically swaps the filter pipeline.
+4. New requests read the new accepted config.
+5. In-flight requests finish on the previous pipeline view.
+6. If the new config fails validation, the previous config stays active.
+
+The Operator runs outside the request path. It may consume Kubernetes
+resource watches, SWIM/CRDT membership state, metrics summaries, and
+policy state — but those are Operator inputs, not Praxis request-path
+dependencies.
 
 ## Demo evidence format
 

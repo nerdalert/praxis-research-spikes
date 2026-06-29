@@ -36,9 +36,9 @@ Epic 664 asks for gateway-level primitives only:
 
 | Epic requirement | In Praxis data plane | Outside this epic |
 | --- | --- | --- |
-| Egress connectivity to remote gateways | Remote gateway clusters, upstream mTLS, timeouts, health, and load-balancing | AI Grid Operator cluster discovery |
+| Egress connectivity to remote gateways | Remote gateway clusters, upstream mTLS, timeouts, health, and load-balancing | AI Grid Operator discovery and reconciliation |
 | mTLS trust establishment | Listener mTLS for grid ingress, upstream mTLS for grid egress, peer identity exposure | Certificate issuance and lifecycle automation |
-| Site descriptor registration | Typed local snapshot/config surface describing sites, capabilities, metrics, and epochs | SWIM/CRDT propagation and Kubernetes reconciliation |
+| Site descriptor registration | Typed local snapshot/config surface describing sites, capabilities, metrics, and epochs | AI Grid Operator reconciliation; SWIM/CRDT and Kubernetes are Operator inputs |
 | Cross-gateway inference routing | Filter selects local or remote gateway cluster using request facts and snapshot candidates | llm-d worker scheduling inside the selected cluster |
 | Cross-gateway agent routing | Reuse existing JSON-RPC/MCP/A2A classification metadata to choose remote agent/tool sites | Full agent policy model from #678 |
 
@@ -71,7 +71,7 @@ gateway cluster to use, while preserving strict trust boundaries.
    inside the synchronous request path.
 6. Make the first implementation useful with static configuration and a
    three-gateway demo.
-7. Leave clear integration points for the AI Grid Operator later.
+7. Define the local snapshot contract the AI Grid Operator will publish.
 
 ## Rust implementation principles
 
@@ -88,74 +88,39 @@ The implementation should follow these rules in addition to
 | Log decisions, not secrets or prompts | Trace route candidate counts, selected site, capability ID, snapshot generation, and stale/fallback reason. Never log API keys or full request bodies. |
 | Fail closed at trust and policy boundaries | Unknown peer identity, invalid internal headers, stale required policy, and untrusted route mutations must reject. Capacity uncertainty can fall back only when explicitly configured. |
 
-## Implementation options
+## Chosen implementation approach
 
-### Option A: config-only static remote clusters
+Gateway-to-gateway routing should use a typed `grid_route` filter backed by an
+immutable local `RoutingSnapshot`, while reusing existing Praxis clusters and
+TLS for actual connectivity.
 
-Praxis config contains all remote gateways as ordinary clusters. Existing
-classifiers plus routers/load balancers route requests to those clusters.
+The `grid_route` filter reads existing request metadata and validated local
+route state. It selects a local backend cluster or remote gateway cluster by
+setting `ctx.cluster`. Existing Praxis load balancing, timeouts, TLS, and mTLS
+continue to own the actual connection and endpoint selection.
 
-| Aspect | Result |
+The AI Grid Operator is responsible for rendering or updating the local gateway
+snapshot outside the request path. Praxis consumes the latest accepted local
+snapshot; it does not run global discovery and does not query the Operator,
+Kubernetes, SWIM, CRDT peers, Prometheus, or a database while a client request
+is waiting.
+
+## Why this approach
+
+| Consideration | Decision |
 | --- | --- |
-| Pros | Smallest change; exercises existing TLS, router, load balancer, health checks, and examples. |
-| Cons | No typed site descriptor model, weak capability matching, no high-churn metric updates without config reload, and poor fit for AI Grid Operator integration. |
-| Good for | A very first manual demo. |
-| Not good for | Epic 664 as accepted upstream functionality. |
-
-### Option B: typed `grid_route` filter with atomic `RoutingSnapshot`
-
-Add a new grid-aware HTTP filter that reads existing request metadata and a
-local immutable routing snapshot. It picks a candidate and sets `ctx.cluster`.
-Existing load balancing, TLS, timeouts, and health checks remain responsible
-for network forwarding.
-
-The snapshot is updated out of band. The first PR can load it from static YAML;
-later work can let an operator replace it through a typed local admin endpoint
-or in-process integration.
-
-| Aspect | Result |
-| --- | --- |
-| Pros | Clean separation of data-plane and control-plane work; fast local reads; testable scoring; aligns with Praxis filter model; avoids request-path locks and network calls. |
-| Cons | Requires new typed data model, snapshot validation, and careful docs about operator ownership. |
-| Good for | Epic 664 upstream path and three-gateway demos. |
-| Not good for | Solving SWIM/CRDT/operator behavior inside Praxis itself. |
-
-### Option C: embed SWIM/CRDT membership directly in Praxis
-
-Praxis would run membership, gossip, CRDT merge, metrics ingestion, and routing
-in one gateway binary.
-
-| Aspect | Result |
-| --- | --- |
-| Pros | Fewer moving pieces for a bespoke product binary. |
-| Cons | Wrong upstream boundary for Praxis; couples proxy lifecycle to cluster discovery; increases blast radius; makes testing, permissions, and upgrades harder. |
-| Good for | A custom downstream AI Grid appliance only after the data-plane contracts are stable. |
-| Not good for | Upstream Praxis issue 664. |
-
-### Option D: delegate grid routing to ext_proc/EPP
-
-Praxis sends request data to an external processor, which returns the selected
-remote gateway or endpoint.
-
-| Aspect | Result |
-| --- | --- |
-| Pros | Similar to the llm-d Track B path; can be useful for specialized schedulers. |
-| Cons | Adds request-path network dependency; mixes local policy, WAN routing, and scheduler behavior; ext_proc failures become routing failures; harder to prove security boundaries. |
-| Good for | Local llm-d worker selection and specialized callouts. |
-| Not good for | Baseline gateway-to-gateway AI Grid routing. |
-
-## Recommended approach
-
-Use Option B: a typed `grid_route` filter backed by an immutable
-`RoutingSnapshot`, while reusing existing Praxis clusters and TLS for actual
-connectivity.
+| Existing router-only routing | Useful for a manual smoke demo, but too weak for upstream AI Grid because it lacks typed site/capability state, freshness metadata, route-decision metadata, and a clean Operator integration contract. |
+| Embedding SWIM/CRDT in Praxis | Wrong upstream boundary. Discovery, reconciliation, and liveness aggregation belong to the AI Grid Operator. Praxis should consume the rendered local snapshot. |
+| Delegating baseline routing to `ext_proc` | Useful for specialized schedulers such as llm-d worker selection, but it adds a request-path network dependency and is not the right baseline for gateway-to-gateway site routing. |
+| Typed immutable snapshot | Rust-friendly validation, cheap request-time reads, deterministic tests, bounded metadata, and clean PR boundaries. |
+| Reusing existing Praxis clusters/TLS | Avoids rebuilding connectivity primitives. `grid_route` chooses the cluster; existing Praxis code connects to it. |
 
 The design should split state into two channels:
 
 | Channel | Update rate | Owner | Praxis mechanism |
 | --- | --- | --- | --- |
-| Connectivity and trust | Slow-changing | Operator or static config | Render ordinary clusters/listeners/TLS and use config hot reload. |
-| Capabilities and metrics | Higher-churn | Operator or static snapshot provider | Replace an immutable `RoutingSnapshot` atomically. |
+| Connectivity and trust | Slow-changing | AI Grid Operator or static bootstrap config | Render ordinary clusters/listeners/TLS and use config hot reload. |
+| Capabilities and metrics | Higher-churn | AI Grid Operator | Replace an immutable `RoutingSnapshot` atomically. |
 
 This avoids hot-reloading the entire proxy for every capacity update, while
 keeping all request-time decisions local and deterministic.
@@ -632,13 +597,13 @@ These should be answered or explicitly deferred in child issues:
 
 1. What exact gateway peer identity format should be authoritative: SPIFFE URI
    SAN, DNS SAN, certificate subject, or a configured matcher list?
-2. Should the first snapshot update path be static YAML only, local file watch,
-   local admin endpoint, or custom binary integration?
+2. What should the first Operator publication mechanism be: rendered file
+   watched by Praxis, local admin endpoint, or in-process snapshot publisher?
 3. What is the initial policy contract with #678: allow-all demo mode, static
    allow lists, or a real deny-by-default filter dependency?
-4. Are remote gateway clusters generated by the Operator as normal Praxis
-   clusters, or should Praxis support a dynamic cluster table in addition to
-   dynamic routing snapshots?
+4. What exact normal Praxis cluster config should the Operator render for
+   remote gateways, and how should `RoutingSnapshot` validate references to
+   those clusters?
 5. For streaming inference and A2A SSE, when is failover allowed? The safe
    default should be no replay after upstream selection.
 6. What route decision fields are required for audit and billing consumers?
@@ -655,8 +620,9 @@ The most useful first slice is:
 4. `grid_route` inference candidate selection;
 5. one three-gateway local integration test with mock backends.
 
-That proves the hard trust boundary and the data-plane shape without waiting
-for SWIM, CRDTs, the Operator, llm-d, or full policy integration.
+That proves the hard trust boundary and the data-plane shape before building
+the AI Grid Operator publication path, SWIM/CRDT inputs, llm-d integration, or
+full policy integration.
 
 ## References
 

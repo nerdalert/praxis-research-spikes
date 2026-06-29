@@ -16,6 +16,11 @@ Praxis gateway. The first gateway chooses a local or remote capability. The
 remote gateway proves who it is with mutual TLS, validates the request came from
 a trusted peer, then forwards to its own local backend.
 
+The chosen architecture is a typed `grid_route` filter backed by an immutable
+local routing snapshot. `grid_route` only chooses the target Praxis cluster;
+existing Praxis clusters, load balancing, timeouts, TLS, and mTLS handle the
+actual network connection.
+
 ## Source branches
 
 | Source | Reference |
@@ -42,8 +47,9 @@ a trusted peer, then forwards to its own local backend.
 ## Client transaction block diagram
 
 This is the basic shape of one client request. The origin gateway makes a local
-route decision from already-loaded routing data; it does not query a database,
-operator, SWIM/gossip, Kubernetes, or metrics service while the client waits.
+route decision from an already-loaded routing snapshot; it does not query a
+database, Operator, SWIM/gossip, Kubernetes, or metrics service while the
+client waits.
 
 ```text
 Client
@@ -56,7 +62,7 @@ Site A Praxis public listener (:18100)
   |    - model name for inference
   |    - tool name for MCP
   |
-  | 2. Read local routing snapshot/config
+  | 2. Read immutable local routing snapshot/config
   |    - known sites
   |    - capability candidates
   |    - freshness/locality hints
@@ -91,6 +97,18 @@ Site A is not a free pass into Site B or Site C.
   A2A needs separate route-key semantics and explicit A2A gateway tests before
   it should be claimed).
 - No claim that POC code is PR-ready.
+- No claim of dynamic fault tolerance or automatic failover.
+
+## Architecture model
+
+There is no master node, leader election, or central coordinator in the
+request path. Each gateway carries its own local routing snapshot and makes
+its own route decision. In production, the AI Grid Operator updates those
+local snapshots in the background. The current demo uses static config, so it
+proves the routing shape but not automatic failover.
+
+See [architecture.md](architecture.md) for details on the masterless
+snapshot model, fault tolerance boundaries, and the Operator update path.
 
 ## Prerequisites
 

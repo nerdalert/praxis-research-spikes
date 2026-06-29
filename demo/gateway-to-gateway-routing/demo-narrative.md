@@ -34,7 +34,7 @@ routing.
 
 The important design choice is that request routing reads a local validated
 snapshot. The request does not query Kubernetes, a database, an Operator, or
-SWIM while the user is waiting. Any future Operator or SWIM layer updates the
+SWIM while the user is waiting. In production, the AI Grid Operator updates the
 snapshot outside the hot path.
 ```
 
@@ -45,7 +45,7 @@ Describe the system as three jobs:
 | Job | Plain meaning | Demo representation |
 | --- | --- | --- |
 | Gateway trust | "Is the other gateway really who it claims to be?" | mTLS plus `grid_ingress_trust`. |
-| Local routing map | "What sites can serve which models or tools?" | Static demo config acting as the routing snapshot. |
+| Local routing map | "What sites can serve which models or tools?" | Static demo config acting as the immutable routing snapshot. |
 | Request routing | "Given this request, where should it go?" | `grid_route` selects local or remote Praxis clusters. |
 
 **Plain-language summary:** certificates prove identity, the local map says what
@@ -88,23 +88,32 @@ This is the part to clarify if people ask about the distributed nature of AI
 Grid.
 
 ```text
-In the demo, the routing snapshot is static config.
+In the demo, the routing snapshot is static config. There is no master node,
+leader election, or central coordinator in the request path.
 
-In the future, an AI Grid Operator or another control-plane process can update
-that snapshot. It may learn state from Kubernetes, metrics, SWIM gossip, or
-another store. But those updates happen before a request is routed.
+In production, the AI Grid Operator will update that snapshot. The Operator
+may consume Kubernetes resources, SWIM/CRDT liveness summaries, and metrics
+— but those are Operator inputs, not Praxis request-path dependencies.
 
-The request itself only reads the latest accepted local snapshot.
+The request itself only reads the latest accepted local snapshot. `grid_route`
+chooses the target cluster; existing Praxis cluster/TLS machinery performs the
+actual connection.
 ```
 
 Use this diagram:
 
 ```text
-Future control plane / static config
-  -> build full routing snapshot
-  -> validate it
-  -> atomically publish it to Praxis
-  -> requests read it locally
+AI Grid Operator (future, outside request path)
+  - watches Kubernetes resources
+  - consumes SWIM/CRDT/liveness summaries
+  - renders local gateway snapshot/config
+            |
+            v
+Praxis validates + hot reloads atomically
+            |
+            v
+New requests read latest accepted local snapshot
+In-flight requests finish on previous snapshot
 ```
 
 Do not describe the design as:
@@ -377,20 +386,22 @@ Do not overclaim these:
 
 ### Are we querying a database, Operator, or SWIM on every request?
 
-No. The request reads local validated state. Future Operator/SWIM/database
-pieces may update the snapshot in the background, but not while the request is
-waiting.
+No. The request reads local validated state only. The AI Grid Operator will
+update the local snapshot in the background. The Operator may consume SWIM,
+Kubernetes, metrics, or database state, but Praxis never queries those systems
+during request handling.
 
 ### What is the current "database" of site records?
 
 For the demo, static YAML/config is the source. It stands in for the routing
-snapshot that a future Operator would publish.
+snapshot that the AI Grid Operator will publish in production.
 
 ### Why not put SWIM in Praxis now?
 
 Because Epic #664 scopes Praxis to the gateway data plane and configuration
-surface. SWIM/operator orchestration is a separate project. Keeping that out of
-the request path makes the proxy easier to test and safer to operate.
+surface. SWIM/CRDT liveness can be an input to the AI Grid Operator, but the
+Operator owns snapshot publication. Keeping that out of the request path makes
+the proxy easier to test and safer to operate.
 
 ### Is llm-d part of this demo?
 
@@ -465,7 +476,8 @@ tests).
 
 **Workflow rule:**
 
-- Do not commit, push, or open PRs from the spike repo.
+- Do not open upstream Praxis PRs from the spike repo.
+- Spike repo commits are allowed only when explicitly requested.
 - The spike is evidence only. Upstream work uses the extraction map.
 
 ## Demo close
@@ -478,8 +490,8 @@ local routing records, deterministic route selection, scoring, and MCP tool
 routing.
 
 The architecture keeps distributed state out of the request path. Praxis reads
-the latest local validated snapshot. Future Operator or SWIM work can update
-that snapshot in the background.
+the latest local validated snapshot. The AI Grid Operator updates that snapshot
+in the background; SWIM/CRDT can feed the Operator, not the request handler.
 
 The next step is not to upstream this spike wholesale. The next step is to use
 the extraction map to turn the validated behavior into small, reviewable
