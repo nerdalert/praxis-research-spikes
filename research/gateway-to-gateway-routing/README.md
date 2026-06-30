@@ -519,7 +519,7 @@ Required:
 - benchmark note or microbenchmark for scorer/snapshot read overhead;
 - operations doc for gateway-to-gateway TLS.
 
-## Suggested child issues to open
+## Child issues to open
 
 | Issue | Title | Size |
 | --- | --- | --- |
