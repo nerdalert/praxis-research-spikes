@@ -101,6 +101,6 @@ Router change: preserve existing `ctx.cluster`.
 
 ## Notes
 
-- No prompts, API keys, cert private keys, or full request bodies in output.
+- No API keys, cert private keys, or full request bodies in output.
 - A2A routing is the single remaining deferred item.
 - `json_rpc`/`mcp` filters require `on_invalid: continue` for mixed-traffic listeners.

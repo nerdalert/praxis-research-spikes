@@ -348,7 +348,7 @@ initial demo).
 | `grid_ingress_trust` filter | `filter/src/builtins/http/security/` | Validate peer identity and protect internal headers on grid listeners | G2G-02 |
 | `RoutingSnapshot` model | `filter/src/builtins/http/ai/grid/` or `core/src/config/` | Typed site/capability/freshness data model | G2G-03 |
 | `grid_route` filter | `filter/src/builtins/http/ai/grid/` | Read metadata + snapshot, select cluster | G2G-04 |
-| Internal route header injection | Inside `grid_route` filter | Add `X-Praxis-Grid-*` headers for gateway-to-gateway hops | G2G-05 |
+| Gateway route metadata | Inside `grid_route` filter | Record bounded gateway-owned route context for gateway-to-gateway hops | G2G-05 |
 | Scoring logic | Inside `grid_route` filter | Freshness/locality/capability scoring | G2G-06 |
 | MCP/A2A candidate matching | Inside `grid_route` filter | Extend matching to tool/agent metadata | G2G-07 |
 
@@ -415,7 +415,7 @@ initial demo).
 | Assertion | Method |
 | --- | --- |
 | Full demo script passes from clean shell | `scripts/run-demo.sh` exits 0 |
-| Sample output is sanitized | No prompts, API keys, cert private keys, or full bodies |
+| Sample output is sanitized | No API keys, cert private keys, or full bodies |
 | Extraction map has concrete file/function references | Diff against template shows filled entries |
 
 ## Known blockers and missing primitives
@@ -542,7 +542,7 @@ demo/gateway-to-gateway-routing/
 - `grid_ingress_trust` filter (G2G-02)
 - `RoutingSnapshot` data model with serde validation (G2G-03)
 - `grid_route` filter with deterministic scoring (G2G-04)
-- Internal route header injection/validation contract (G2G-05)
+- Gateway route metadata/forwarding contract (G2G-05)
 - Freshness/locality scoring (G2G-06)
 - MCP/A2A candidate matching (G2G-07)
 - Example configs and integration tests (G2G-08)
@@ -556,9 +556,9 @@ demo/gateway-to-gateway-routing/
 - Monolithic POC filter implementations that combine multiple concerns
 - Any `verify: false` or security shortcuts
 
-## First coding prompt recommendation for G2G-E2E-01
+## First E2E implementation step
 
-The next task should create the minimal runnable harness:
+The first runnable harness creates:
 
 1. Write `scripts/generate-certs.sh` using `openssl` to create
    the grid CA and per-site certificates.
@@ -573,9 +573,9 @@ The next task should create the minimal runnable harness:
    grid listener without cert fails; all processes start and
    stop cleanly.
 
-This does not require any Praxis code changes. It exercises
-existing mTLS, router, and load_balancer functionality. The
-POC filter code starts in G2G-E2E-02.
+This step does not require any Praxis code changes. It exercises existing
+mTLS, router, and load_balancer functionality. The POC filter code starts in
+G2G-E2E-02.
 
 ## G2G-E2E-01 results
 

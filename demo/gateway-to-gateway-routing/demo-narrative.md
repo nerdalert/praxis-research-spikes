@@ -116,7 +116,7 @@ New requests read latest accepted local snapshot
 In-flight requests finish on previous snapshot
 ```
 
-Do not describe the design as:
+Incorrect mental model:
 
 ```text
 request arrives
@@ -125,8 +125,8 @@ request arrives
   -> route
 ```
 
-**Plain-language summary:** update the map in the background; do not ask the map
-maker while the user is waiting.
+**Plain-language summary:** update the map in the background so the request
+path only reads local accepted state.
 
 ## Commands to run
 
@@ -367,9 +367,7 @@ Interpretation:
 | MCP routing | Tool calls can cross gateway boundaries through the same trust path. |
 | PR-stack evidence | The behavior maps to small upstream implementation slices. |
 
-## What the demo does not prove
-
-Do not overclaim these:
+## Current demo limits
 
 | Not proven | Why |
 | --- | --- |
@@ -415,17 +413,15 @@ Static snapshots make the behavior deterministic and reviewable. Once the data
 model and route behavior are stable, a dynamic updater can replace the snapshot
 without changing the request-path contract.
 
-### Are we ready to open PRs?
+### How does this relate to upstream PRs?
 
-No. The workflow rule is:
+The spike is evidence for upstream PR planning, not code to upstream wholesale:
 
 ```text
 finish and validate the full spike demo narrative
   -> review demo evidence and gaps
   -> only then split upstream PR-sized tasks
 ```
-
-No commit, push, or PR should happen until explicitly requested.
 
 ## Demo operator checklist
 
@@ -464,7 +460,7 @@ The single SKIP is A2A routing (intentionally deferred because MCP route
 metadata was validated first and A2A still needs explicit route semantics and
 tests).
 
-**What not to claim:**
+**Demo boundaries:**
 
 - A2A routing is not implemented; it remains deferred until explicit A2A route
   semantics and gateway tests are defined.
@@ -474,11 +470,11 @@ tests).
 - Forwarding metadata is bounded filter metadata only, not a finalized contract.
 - The POC code is not PR-ready.
 
-**Workflow rule:**
+**Upstreaming status:**
 
-- Do not open upstream Praxis PRs from the spike repo.
-- Spike repo commits are allowed only when explicitly requested.
-- The spike is evidence only. Upstream work uses the extraction map.
+- Upstream Praxis PRs are not opened from this demo package.
+- The spike is evidence only. Upstream work uses the extraction map and PR
+  stack.
 
 ## Demo close
 

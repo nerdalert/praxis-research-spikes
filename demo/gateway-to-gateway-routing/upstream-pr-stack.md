@@ -3,10 +3,9 @@
 The E2E may be implemented as a single validation branch first. After the demo
 passes, split the work into upstream PR-sized changes using this map.
 
-This is the tracked, public PR-stack source for the spike. Local/private task
-drafts can exist outside this repo, but this document must be sufficient for a
-future maintainer to understand the planned PR boundaries, evidence, required
-tests, and known caveats.
+This is the public PR-stack source for the spike. It describes planned PR
+boundaries, evidence, required tests, and known caveats without carrying local
+task-planning material.
 
 ## Chosen architecture boundary
 
@@ -33,73 +32,6 @@ handling reads the latest accepted local snapshot.
 | G2G-07 MCP/A2A routing | Extend route candidate extraction to existing MCP/A2A metadata. | MCP `tools/call` routes cross gateway boundary via `mcp.name` filter metadata. E2E assertion 29 proves tool routes to site-c through mTLS. A2A deferred because it needs separate route-key semantics, session/task expectations, and explicit A2A gateway tests. | **MCP validated by G2G-E2E-04.** A2A deferred for a follow-up after those semantics/tests are defined. File: `filter/src/builtins/http/ai/grid/route.rs`. |
 | G2G-08 examples and docs | Add public examples, generated docs, and integration tests. | Demo configs become minimal upstream examples after POC-only code is removed. | **Required before upstream acceptance.** Converts demo evidence into user-facing docs and integration/example coverage. |
 
-## Extraction note template
-
-Every meaningful E2E implementation area should include this note in the demo
-handoff:
-
-```text
-Extraction target:
-Validated behavior:
-Files touched in E2E:
-Likely upstream files:
-POC-only shortcuts:
-Required tests:
-Config/docs impact:
-Security or correctness pitfalls:
-Open questions:
-```
-
-## Implementation task template
-
-When creating an implementation task from this stack, use this shape. The task
-draft can live in a local/private file, but the tracked spike docs must retain
-the evidence, scope, tests, and caveats.
-
-```text
-## UP-G2G-XX — short upstreamable title
-
-Validated by:
-- E2E task:
-- Demo assertion(s):
-- POC commit / diff reference:
-
-Goal:
-Implement exactly one upstreamable behavior.
-
-Scope:
-- Files/modules likely involved:
-- Public config/API changes:
-- Docs/examples required:
-
-Non-goals:
-- POC-only shortcuts not allowed:
-- Later G2G targets not included:
-
-Implementation notes learned from E2E:
-- Pitfalls:
-- Security boundaries:
-- Compatibility constraints:
-
-Required tests:
-- Unit:
-- Integration:
-- Example config/test:
-- Negative/adversarial:
-
-Validation commands:
-- make lint
-- focused cargo tests
-- affected integration tests
-- make test when practical
-
-Handoff requirements:
-- changed files and why
-- commands run and results
-- open questions
-- extraction link back to E2E evidence
-```
-
 ## Split rules
 
 - Do not upstream the E2E branch wholesale.
@@ -113,7 +45,8 @@ Handoff requirements:
 
 ## PR breakout notes
 
-Each upstream target with copy/paste-friendly extraction guidance.
+Each upstream target includes the validated behavior, likely upstream files,
+test expectations, and explicit non-goals needed to preserve the PR boundary.
 
 ### UP-G2G-01: peer identity
 

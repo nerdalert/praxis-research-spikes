@@ -9,6 +9,24 @@ before splitting the work into individual upstream Praxis PRs.
 This is a spike and demo workspace. It is allowed to prove the full path first,
 then extract clean PR-sized upstream changes after the behavior is understood.
 
+## Start here
+
+- [Proposal](proposal.md) explains the gateway-to-gateway design, scope from
+  Epic 664, data model, route behavior, security rules, and PR-sized
+  implementation plan.
+- [Architecture](architecture.md) shows the validated three-gateway topology,
+  trust boundaries, local-snapshot model, and fault-tolerance boundary.
+- [Demo narrative](demo-narrative.md) is the presenter walkthrough for running
+  and explaining the demo.
+- [Upstream PR stack](upstream-pr-stack.md) maps the validated behavior to
+  upstream Praxis PR slices.
+- [Implementation notes](implementation-notes.md) preserve the detailed E2E
+  build notes and validation history.
+- [Sample output](sample-output.md) contains a sanitized passing run.
+
+Local planning checklists are intentionally kept outside the public spike
+package.
+
 ## Plain-language summary
 
 This demo proves that one Praxis gateway can safely send a request to another
@@ -23,10 +41,10 @@ actual network connection.
 
 ## Source branches
 
-| Source | Reference |
-| --- | --- |
-| Praxis POC implementation | [`nerdalert/praxis:praxis-multi-cluster-poc-v1`](https://github.com/nerdalert/praxis/tree/praxis-multi-cluster-poc-v1) |
-| Spike demo package | [`nerdalert/praxis-research-spikes:main`](https://github.com/nerdalert/praxis-research-spikes/tree/main/demo/gateway-to-gateway-routing) |
+- Praxis POC implementation:
+  [`nerdalert/praxis:praxis-multi-cluster-poc-v1`](https://github.com/nerdalert/praxis/tree/praxis-multi-cluster-poc-v1)
+- Spike demo package:
+  [`nerdalert/praxis-research-spikes:main`](https://github.com/nerdalert/praxis-research-spikes/tree/main/demo/gateway-to-gateway-routing)
 
 ## What the E2E proves
 
@@ -42,7 +60,7 @@ actual network connection.
 | Freshness scoring | Fresh remote candidate beats stale remote candidate. |
 | Local preference scoring | Local candidate wins when scores are otherwise equal. |
 | MCP tool route | JSON-RPC `tools/call` for `weather-lookup` crosses gateway boundary. |
-| Safe metadata | Route decisions logged with bounded keys/values; no prompts or secrets. |
+| Safe metadata | Route decisions logged with bounded keys/values; no secrets or full request bodies. |
 
 ## Client transaction block diagram
 
@@ -171,15 +189,16 @@ PRAXIS_BIN=/path/to/praxis bash scripts/run-demo.sh
 
 Use [demo-narrative.md](demo-narrative.md) as the presenter script. It explains
 the architecture in plain language, walks through each assertion group, calls
-out what the demo proves, and lists what should not be claimed yet.
+out what the demo proves, and names the current production gaps.
 
 Use [run-complete-e2e-demo.sh](run-complete-e2e-demo.sh) to generate a
 Markdown transcript with the command sequence, narrative context, and full
 assertion output. The default output is `demo-output.md`.
 
-Workflow rule: do not commit, push, or open upstream Praxis PRs from this work
-until the spike demo evidence and narrative have been reviewed and explicitly
-accepted.
+Upstream Praxis PRs are separate from this demo package. This repository stores
+the evidence and extraction plan; upstreaming should use
+[upstream-pr-stack.md](upstream-pr-stack.md) instead of copying the POC branch
+wholesale.
 
 ## Process topology
 
@@ -205,8 +224,8 @@ a grid listener (mTLS). Sites B and C have grid listeners only.
 ## Upstream PR stack
 
 See [upstream-pr-stack.md](upstream-pr-stack.md) for the complete extraction
-plan. Implementation task drafts are intentionally kept local/private and are not
-tracked in this public spike package.
+plan. The public docs preserve scope, evidence, and PR boundaries. Local task
+planning material stays outside the tracked spike package.
 
 | Target | Status |
 | --- | --- |
@@ -221,17 +240,21 @@ tracked in this public spike package.
 
 ## Files in this directory
 
-| File | Purpose |
-| --- | --- |
-| [README.md](README.md) | This file — run instructions and E2E overview. |
-| [architecture.md](architecture.md) | E2E topology, trust boundaries, and route scenarios. |
-| [implementation-notes.md](implementation-notes.md) | Detailed implementation notes and E2E results by task. |
-| [demo-narrative.md](demo-narrative.md) | Presenter script and plain-language demo walkthrough. |
-| [run-complete-e2e-demo.sh](run-complete-e2e-demo.sh) | Generates a Markdown command/output transcript for the full demo. |
-| [upstream-pr-stack.md](upstream-pr-stack.md) | Upstream PR split with evidence references. |
-| [pr-stack-documentation-plan.md](pr-stack-documentation-plan.md) | Documentation contract for E2E validation and upstream PR extraction. |
-| [sample-output.md](sample-output.md) | Sanitized demo output. |
-| `configs/` | Praxis YAML configs for three gateways. |
-| `scripts/` | Demo lifecycle scripts. |
-| `mocks/` | Python mock backends for inference, MCP, and A2A. |
-| `.gitignore` | Excludes generated certs/logs/PIDs and local-only implementation task drafts. |
+- [README.md](README.md) is the runbook and entry point.
+- [proposal.md](proposal.md) is the consolidated Epic 664 proposal and
+  implementation plan.
+- [architecture.md](architecture.md) describes topology, trust boundaries,
+  route scenarios, snapshot updates, and fault-tolerance limits.
+- [implementation-notes.md](implementation-notes.md) records detailed E2E
+  implementation notes and validation results by task.
+- [demo-narrative.md](demo-narrative.md) is the presenter walkthrough.
+- [upstream-pr-stack.md](upstream-pr-stack.md) maps validated behavior to
+  upstream Praxis PR slices.
+- [sample-output.md](sample-output.md) is sanitized passing output from the
+  final demo run.
+- [run-complete-e2e-demo.sh](run-complete-e2e-demo.sh) generates a Markdown
+  command/output transcript.
+- `configs/` contains the three Praxis gateway configs.
+- `scripts/` contains demo lifecycle scripts.
+- `mocks/` contains Python mock backends for inference, MCP, and A2A.
+- `.gitignore` excludes generated certs/logs/PIDs and local-only notes.

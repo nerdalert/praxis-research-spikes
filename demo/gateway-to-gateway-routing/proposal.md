@@ -1,17 +1,18 @@
-# Gateway-to-gateway connectivity, metadata, and routing implementation plan
+# Gateway-to-gateway connectivity, metadata, and routing proposal
 
 ## Status
 
-This document is an implementation plan for
+This document is the consolidated proposal and implementation plan for
 [praxis-proxy/praxis#664](https://github.com/praxis-proxy/praxis/issues/664),
 "Gateway-to-Gateway Connectivity, Metadata and Routing".
 
-It is based on the live GitHub issue state as of June 25, 2026, the local
-Praxis checkout at `praxis/`, and the existing AI Grid research notes in this
-workspace. Issue 664 has no child issues or comments yet. The broader tracking
-issue is [#690](https://github.com/praxis-proxy/praxis/issues/690); related
-scope boundaries include the policy epic [#678](https://github.com/praxis-proxy/praxis/issues/678)
-and the llm-d epic [#16](https://github.com/praxis-proxy/praxis/issues/16).
+It replaces the previous standalone research note under `research/` so the
+gateway-to-gateway demo directory is the single public source for the proposal,
+E2E evidence, and upstream PR split. The broader tracking issue is
+[#690](https://github.com/praxis-proxy/praxis/issues/690); related scope
+boundaries include the policy epic
+[#678](https://github.com/praxis-proxy/praxis/issues/678) and the llm-d epic
+[#16](https://github.com/praxis-proxy/praxis/issues/16).
 
 ## Summary
 
@@ -113,26 +114,58 @@ keeping all request-time decisions local and deterministic.
 ## Target architecture
 
 ```text
-                 AI Grid Operator / static bootstrap
-                              │
-          ┌───────────────────┴───────────────────┐
-          │                                       │
-          v                                       v
-   Praxis config                         RoutingSnapshot
-   - listeners                           - sites
-   - clusters                            - capabilities
-   - TLS trust                           - capacity summaries
-   - timeouts                            - policy/snapshot epochs
-          │                                       │
-          └───────────────────┬───────────────────┘
-                              v
- Client/agent ──> Praxis filter chain ──> grid_route ──> load_balancer ──> backend
-                    │                         │
-                    │                         ├─ local cluster
-                    │                         └─ remote gateway cluster over mTLS
-                    v
-             protocol classifiers
-             OpenAI/MCP/A2A metadata
+Control/update path, outside request handling
+
+                     AI Grid Operator or static bootstrap
+                                      |
+                  +-------------------+-------------------+
+                  |                                       |
+                  | slow-changing connectivity/trust      | higher-churn route state
+                  v                                       v
+          Praxis config                         immutable RoutingSnapshot
+          - listeners                           - sites
+          - clusters                            - capabilities
+          - TLS trust                           - freshness/capacity summaries
+          - timeouts                            - policy/snapshot epochs
+                  |                                       |
+                  +-------------------+-------------------+
+                                      |
+                                      v
+                         accepted local gateway state
+
+
+Request path, per client transaction
+
+  Client / agent
+      |
+      v
+  Praxis public listener
+      |
+      v
+  protocol classifiers
+      - OpenAI model metadata
+      - MCP tool metadata
+      - A2A metadata, once route semantics are defined
+      |
+      v
+  grid_route
+      - reads request metadata
+      - reads latest accepted RoutingSnapshot
+      - selects ctx.cluster only
+      |
+      +-------------------------------+
+      |                               |
+      v                               v
+  local Praxis cluster           remote gateway cluster
+      |                               |
+      v                               v
+  load_balancer                  upstream mTLS
+      |                               |
+      v                               v
+  local backend / llm-d          destination Praxis grid listener
+                                  - validates mTLS peer identity
+                                  - applies grid ingress trust
+                                  - routes to destination-local backend / llm-d
 ```
 
 For remote gateway traffic:
@@ -143,7 +176,7 @@ origin workload
   -> request classification + policy
   -> grid_route selects remote-site-b gateway cluster
   -> upstream mTLS to destination Praxis grid listener
-  -> destination validates mTLS peer identity and internal route headers
+  -> destination validates mTLS peer identity and gateway route context
   -> destination applies local policy and routes to local inference/tool/agent
 ```
 
@@ -190,15 +223,16 @@ The first upstreamable filter should be deterministic and local.
 | `ctx.cluster` | Selects local backend cluster or remote gateway cluster. |
 | Typed `RouteDecision` extension | Lets later filters and response logging see the selected route without parsing strings. |
 | Safe metadata | Snapshot generation, selected site, capability ID, and decision reason for logs/metrics. |
-| Optional internal headers | Only generated for gateway-to-gateway traffic and stripped/validated at trust boundaries. |
+| Optional gateway-to-gateway forwarding context | Future contract for making route context visible to the destination gateway; must be generated by Praxis and stripped/validated at trust boundaries. |
 
 ### Non-goals
 
-- Do not open network connections.
-- Do not call Kubernetes, Prometheus, SWIM, or a remote scheduler.
-- Do not own worker/pod selection inside llm-d.
-- Do not gossip or store provider credentials.
-- Do not replay requests after bytes may have reached a backend.
+- Opening network connections in `grid_route`.
+- Calling Kubernetes, Prometheus, SWIM, or a remote scheduler from the request
+  path.
+- Owning worker/pod selection inside llm-d.
+- Gossiping or storing provider credentials.
+- Replaying requests after bytes may have reached a backend.
 
 ## mTLS and trust design
 
@@ -211,7 +245,7 @@ identity on grid ingress.
 | Origin connects to destination gateway with client cert | `ClusterTls.client_cert` | Use existing upstream mTLS config. |
 | Destination requires client cert | `ListenerTls.client_cert_mode: require` | Use existing listener mTLS config. |
 | Destination authorizes a specific grid peer | Partial | Expose verified peer certificate identity in `HttpFilterContext`. |
-| Internal route headers are trusted only from grid peers | Not enough today | Add a filter that strips public client-supplied grid headers and validates internal headers only on mTLS-authenticated grid listeners. |
+| Gateway route context is trusted only from grid peers | Not enough today | Strip public client-supplied grid context and validate any gateway-owned forwarding context only on mTLS-authenticated grid listeners. |
 
 Recommended identity model:
 
@@ -264,7 +298,7 @@ The operator should produce the same validated `RoutingSnapshot`, either by:
 2. calling a local admin endpoint that replaces the snapshot; or
 3. building a custom Praxis binary with an in-process snapshot publisher.
 
-Do not start with direct Kubernetes watches in the Praxis gateway.
+Direct Kubernetes watches belong in the Operator, not the Praxis gateway.
 
 ## Scoring model
 
@@ -280,9 +314,32 @@ The first scorer should be intentionally simple and explainable.
 | Cost/tier | Static additive or subtractive score. |
 | Session/task affinity | If a valid binding exists, prefer or require that site depending on config. |
 
-Avoid overfitting the first implementation. The route decision must be
+Keep the first scoring implementation intentionally small. The route decision must be
 auditable: "selected site-b because it was eligible, fresh, same region, and
 had the highest score" is better than a complex opaque ranking formula.
+
+### Scoring boundary with llm-d
+
+`grid_route` scoring is gateway-level scoring. It should decide which Praxis
+cluster receives the request: a local inference cluster, a remote gateway
+cluster, a tool cluster, or later another supported target class.
+
+It should not choose a GPU pod, model worker, or llm-d endpoint. After
+`grid_route` sets `ctx.cluster`, existing Praxis load balancing and any
+downstream llm-d/EPP integration still decide where the workload lands inside
+the selected cluster or site.
+
+This keeps the layers separate:
+
+| Layer | Decision |
+| --- | --- |
+| AI Grid / `grid_route` | Which site, gateway, or Praxis cluster should receive this request? |
+| Praxis load balancer | Which endpoint in the selected cluster should receive the HTTP request? |
+| llm-d / EPP | Which local inference worker or pod should run the model request? |
+
+The scoring inputs can include coarse site-level signals such as freshness,
+locality, or capacity summary, but they should not duplicate llm-d's
+fine-grained worker scheduling.
 
 ## Inference routing path
 
@@ -295,7 +352,7 @@ OpenAI-compatible request
        local llm-d/EPP can choose worker later
   -> remote site selected:
        ctx.cluster = remote gateway cluster
-       add trusted internal route headers
+       record bounded route metadata
   -> load_balancer picks endpoint
   -> upstream mTLS or local cluster
 ```
@@ -427,23 +484,25 @@ Tests:
 
 ### 664-05: remote gateway forwarding contract
 
-Add internal route headers for trusted gateway-to-gateway traffic and verify
+Define the gateway-to-gateway forwarding metadata contract and verify
 destination behavior.
 
 Implementation notes:
 
-- synthesize bounded internal headers only after a trusted route decision;
-- include origin site, selected capability, snapshot generation, and route ID;
-- destination validates origin identity and headers before using them;
-- strip internal headers before sending to final non-grid backend unless
+- record bounded gateway-owned route context only after a trusted route
+  decision;
+- include origin site, selected capability, snapshot generation, and route ID
+  if that context is forwarded across a gateway boundary;
+- destination validates origin identity and forwarding context before using it;
+- strip gateway-owned context before sending to final non-grid backend unless
   explicitly allowed.
 
 Tests:
 
-- origin adds headers only for remote gateway cluster;
-- destination accepts valid mTLS/header pair;
-- destination rejects spoofed or mismatched headers;
-- final backend does not receive internal headers by default.
+- origin records route context only for successful route decisions;
+- destination accepts valid mTLS and gateway-owned route context;
+- destination rejects spoofed or mismatched context;
+- final backend does not receive gateway-owned context by default.
 
 ### 664-06: capacity/freshness-aware scoring
 
@@ -454,7 +513,7 @@ Implementation notes:
 - implement small additive scoring with documented weights;
 - include freshness penalties and stale-data behavior;
 - add local preference and same-region preference;
-- no prompt-derived high-cardinality labels or logs.
+- no request-derived high-cardinality labels or logs.
 
 Tests:
 

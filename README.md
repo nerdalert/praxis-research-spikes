@@ -32,6 +32,8 @@ Validation workspace for the gateway-to-gateway connectivity, metadata, and
 routing epic. Proves the full three-gateway path before upstream PRs are split.
 Uses the Praxis POC branch
 [`nerdalert/praxis:praxis-multi-cluster-poc-v1`](https://github.com/nerdalert/praxis/tree/praxis-multi-cluster-poc-v1).
+The consolidated proposal and implementation plan now live with the demo as
+[`demo/gateway-to-gateway-routing/proposal.md`](demo/gateway-to-gateway-routing/proposal.md).
 
 ---
 
@@ -52,11 +54,6 @@ Validates native Responses passthrough, Codex-facing model alias rewrite/default
 Validates local A2A task-ownership routing, including task capture from SendMessage responses, follow-up routing by task ID, fallback for unknown tasks, and spoofing rejection.
 
 ## Spikes
-
-### [Gateway-to-Gateway Routing Implementation Plan](research/gateway-to-gateway-routing/)
-
-Implementation plan for the Praxis gateway-to-gateway connectivity, mTLS trust,
-site metadata, and cross-gateway inference/agent routing epic.
 
 ### [Stateful Proxy Analysis](research/stateful-proxy/)
 

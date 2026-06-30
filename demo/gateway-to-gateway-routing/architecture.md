@@ -47,7 +47,7 @@ stack. It is the evidence used to decide the PR stack.
 
 | Boundary | Rule |
 | --- | --- |
-| Public client to site A | Client has no gateway authority. Any internal route headers are stripped or rejected. |
+| Public client to site A | Client has no gateway authority. Any gateway-owned route context is stripped or rejected. |
 | Site A to site B/C | Site A must present a gateway client certificate. |
 | Site B/C grid ingress | Peer certificate identity must map to an allowed origin site. |
 | Destination gateway to local backend | Internal gateway metadata is not forwarded to final backends unless explicitly allowed. |
@@ -64,7 +64,7 @@ stack. It is the evidence used to decide the PR stack.
 | MCP tool | JSON-RPC/MCP request for a site C tool | site A → mTLS → site C → tool mock |
 | A2A agent | A2A request for a site B agent | Deferred; mocks exist, but cross-gateway A2A routing is not claimed until route-key/session semantics and tests exist. |
 
-## Suggested implementation shape
+## Implementation shape
 
 The selected architecture is a typed `grid_route` filter backed by an
 immutable local routing snapshot. `grid_route` parses bounded request facts,
@@ -72,7 +72,7 @@ scores validated candidates from that snapshot, and sets `ctx.cluster`.
 Existing Praxis clusters, load balancing, timeouts, TLS, and mTLS then own
 the actual connection to either a local backend or a remote gateway.
 
-The E2E branch can temporarily implement a small set of POC primitives:
+The E2E validates a small set of data-plane primitives:
 
 1. peer identity exposure from downstream mTLS;
 2. ingress trust/internal-header protection;
@@ -82,9 +82,8 @@ The E2E branch can temporarily implement a small set of POC primitives:
 5. internal route metadata injection for gateway-to-gateway hops; and
 6. destination-side validation and local forwarding.
 
-Keep these implementation areas visibly separated in files and docs. The goal
-is not to make one polished mega-PR. The goal is to learn the correct seams for
-the later PR stack.
+These implementation areas remain separated in files and docs so the
+validated behavior can be split into focused upstream PRs.
 
 ## Masterless local-snapshot architecture
 
@@ -141,9 +140,9 @@ tolerant** yet:
   is not wired into `grid_route` yet.
 - Dynamic failover belongs in the Operator-driven snapshot update path.
 
-Avoid claiming: "fully fault tolerant," "automatic failover,"
-"self-healing," or "live liveness-based routing." The correct description
-is **fault-tolerance-ready architecture with static POC freshness signals**.
+The accurate description is **fault-tolerance-ready architecture with static
+POC freshness signals**. Automatic failover, self-healing, and live
+liveness-based routing require the Operator-driven snapshot update path.
 
 ## What happens when a snapshot changes
 
@@ -165,13 +164,14 @@ resource watches, SWIM/CRDT membership state, metrics summaries, and
 policy state — but those are Operator inputs, not Praxis request-path
 dependencies.
 
-## Demo evidence format
+## Demo artifacts
 
-Each run should produce a concise `sample-output.md` containing:
+The demo package includes `sample-output.md` with:
 
 - command line used;
 - source revisions;
 - pass/fail summary table;
-- route decision excerpts with no prompts, secrets, private keys, or full bodies;
-- any known deviations from the intended architecture; and
+- route decision excerpts with no secrets, private keys, or full request
+  bodies;
+- known deviations from the intended architecture; and
 - extraction notes for future PRs.
