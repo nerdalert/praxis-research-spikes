@@ -113,9 +113,9 @@ keeping all request-time decisions local and deterministic.
 
 ## Target architecture
 
-```text
 Control/update path, outside request handling
 
+```text
                      AI Grid Operator or static bootstrap
                                       |
                   +-------------------+-------------------+
@@ -132,10 +132,11 @@ Control/update path, outside request handling
                                       |
                                       v
                          accepted local gateway state
-
+```
 
 Request path, per client transaction
 
+```text
   Client / agent
       |
       v
