@@ -3,12 +3,14 @@
 #
 # Runs all validated demo steps in order:
 #   provider baseline → provider gateways → consumer G2G (static) →
-#   consumer G2G (overlay) → mTLS trust → teardown
+#   consumer G2G (overlay) → mTLS trust →
+#   mock-openai /v1/responses provider gateway → teardown
 #
 # Usage:
 #   bash scripts/run-full-demo.sh
 #   GRID_REPO=/path/to/grid bash scripts/run-full-demo.sh
-#   SKIP_OVERLAY=1 bash scripts/run-full-demo.sh   # skip overlay step
+#   SKIP_OVERLAY=1 bash scripts/run-full-demo.sh      # skip overlay step
+#   SKIP_RESPONSES=1 bash scripts/run-full-demo.sh    # skip /v1/responses step
 #
 # Prerequisites: bash scripts/check-prereqs.sh
 set -euo pipefail
@@ -17,7 +19,9 @@ GRID_REPO="${GRID_REPO:-${HOME}/grid}"
 CARGO="${CARGO:-cargo}"
 TOOLCHAIN="${TOOLCHAIN:-+1.96.0}"
 OVERLAY_CONFIG="${OVERLAY_CONFIG:-/tmp/grid-demo-overlay.json}"
+MOCK_OPENAI_CONFIG="${MOCK_OPENAI_CONFIG:-/tmp/grid-mock-openai-config.toml}"
 SKIP_OVERLAY="${SKIP_OVERLAY:-0}"
+SKIP_RESPONSES="${SKIP_RESPONSES:-0}"
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -97,19 +101,76 @@ fi
 # ---------------------------------------------------------------------------
 
 header "STAGE 5 — Verify mTLS trust (expected: 9/10 or 10/10)"
-xtask env verify-mtls-trust || true   # 9/10 is acceptable; do not abort
+xtask env verify-mtls-trust || true   # 9/10 is acceptable; see troubleshooting
 
 # ---------------------------------------------------------------------------
-# Teardown
+# Teardown of inference-sim topology
 # ---------------------------------------------------------------------------
 
-header "TEARDOWN"
+header "TEARDOWN — inference-sim clusters"
 xtask env down
+
+# ---------------------------------------------------------------------------
+# Stage 6: mock-openai backend + /v1/responses provider gateway verification
+# ---------------------------------------------------------------------------
+
+if [ "${SKIP_RESPONSES}" = "0" ]; then
+  # Requires: grid-mock-providers:latest (built separately from mock-providers/Containerfile)
+  if ! docker image inspect grid-mock-providers:latest &>/dev/null 2>&1 && \
+     ! podman image inspect grid-mock-providers:latest &>/dev/null 2>&1; then
+    echo "WARNING: grid-mock-providers:latest not found."
+    echo "  Build it with: docker build -t grid-mock-providers:latest -f mock-providers/Containerfile ."
+    echo "  Skipping /v1/responses step."
+    SKIP_RESPONSES=1
+  fi
+fi
+
+if [ "${SKIP_RESPONSES}" = "0" ]; then
+  if [ ! -f "${MOCK_OPENAI_CONFIG}" ]; then
+    echo "Copying mock-openai config to ${MOCK_OPENAI_CONFIG}"
+    cp "${DEMO_DIR}/configs/mock-openai-config.toml" "${MOCK_OPENAI_CONFIG}"
+  fi
+
+  # Trap ensures mock-openai clusters are torn down even if a step fails.
+  _MOCK_OPENAI_UP=0
+  _mock_openai_cleanup() {
+    if [ "${_MOCK_OPENAI_UP}" = "1" ]; then
+      echo "Cleaning up mock-openai clusters on exit..."
+      xtask env down --config "${MOCK_OPENAI_CONFIG}" 2>/dev/null || true
+    fi
+  }
+  trap _mock_openai_cleanup EXIT
+
+  header "STAGE 6 — Stand up mock-openai backend cluster"
+  xtask env up --config "${MOCK_OPENAI_CONFIG}"
+  _MOCK_OPENAI_UP=1
+
+  header "STAGE 6 — Load images (includes grid-mock-providers for mock-openai cluster)"
+  xtask env load-gateway-images --config "${MOCK_OPENAI_CONFIG}"
+
+  header "STAGE 6 — Deploy provider gateways (mock-openai backend)"
+  xtask env deploy-provider-gateways --config "${MOCK_OPENAI_CONFIG}"
+
+  header "STAGE 6 — Verify: Chat Completions + /v1/responses (expected: 9/9)"
+  xtask env verify-provider-gateways --config "${MOCK_OPENAI_CONFIG}"
+
+  header "TEARDOWN — mock-openai clusters"
+  xtask env down --config "${MOCK_OPENAI_CONFIG}"
+  _MOCK_OPENAI_UP=0
+  trap - EXIT
+else
+  echo "SKIPPING /v1/responses stage (SKIP_RESPONSES=1 or image missing)"
+fi
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
 
 echo ""
 echo "=== Demo complete ==="
-echo "  Provider baseline:  15/15"
-echo "  Provider gateways:  16/16"
-echo "  Consumer G2G static: 8/8"
-[ "${SKIP_OVERLAY}" = "0" ] && echo "  Consumer G2G overlay: 8/8"
-echo "  mTLS trust:          9/10 or 10/10 (timing flake in kind)"
+echo "  Provider baseline:    15/15"
+echo "  Provider gateways:    16/16"
+echo "  Consumer G2G static:   8/8"
+[ "${SKIP_OVERLAY}"   = "0" ] && echo "  Consumer G2G overlay:  8/8"
+echo "  mTLS trust:            9/10 or 10/10 (see troubleshooting)"
+[ "${SKIP_RESPONSES}" = "0" ] && echo "  /v1/responses gateway: 9/9"

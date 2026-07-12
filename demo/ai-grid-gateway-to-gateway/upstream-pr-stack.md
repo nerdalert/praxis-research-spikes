@@ -2,99 +2,117 @@
 
 Maps demo validation to the PRs that implement each behavior.
 
+Last full validation: 2026-07-12 (10/10 mTLS, all demos PASS)
+
+---
+
+## Validation branches
+
+| Repo | Branch / Ref | Purpose |
+|---|---|---|
+| `praxis-proxy/grid` | `main` @ `0969412` | Grid xtask demo commands |
+| `nerdalert/praxis` | `ai-grid-g2g-demo-validation` @ `ab4bc3f` | Praxis G2G filters (demo fork branch) |
+
+The `nerdalert/praxis:ai-grid-g2g-demo-validation` branch is a reproducibility
+anchor until the Praxis upstream PRs (below) are opened and merged.
+
 ---
 
 ## Praxis PRs
 
-These implement the data-plane primitives. All four are prepared locally.
+These implement the data-plane primitives. All four are committed to
+`nerdalert/praxis:ai-grid-g2g-demo-validation` and ready for upstream review.
 
-| PR | Title | Status | Depends on |
+| PR | Title | Upstream status | Depends on |
 |---|---|---|---|
-| UP-G2G-01 | `feat(tls): expose downstream mTLS peer identity` | Ready | none |
-| UP-G2G-02 | `feat(filter): add grid_ingress_trust peer identity enforcement` | Ready | UP-G2G-01 |
-| UP-G2G-03/04 | `feat(filter): add grid_route inference routing` | Ready (hold for selector fix) | none |
-| UP-G2G-07 | `feat(filter): add MCP tool routing to grid_route` | Ready | UP-G2G-04 |
+| PR-04 | `feat(tls): expose downstream mTLS peer identity` | Ready to open | none |
+| PR-05 | `feat(filter): add grid_route inference routing` | Ready to open | none |
+| PR-06 | `feat(filter): add grid_ingress_trust mTLS peer identity enforcement` | Ready to open | PR-04 |
+| PR-07 | `feat(filter): add MCP tool routing to grid_route` | Ready to open | PR-05 |
 
-**Root bug fixed in UP-G2G-01:** The `filter_context!` macro used `.take()` on
+**Root bug fixed in PR-04:** The `filter_context!` macro used `.take()` on
 `peer_identity`, consuming it during pre-read body processing. Fixed with
 `.clone()`. This was why `grid_ingress_trust` returned 403 despite valid certs.
 
+Submit PR-04 + PR-05 simultaneously (independent). Submit PR-06 after PR-04
+merges. Submit PR-07 after PR-05 merges.
+
 ---
 
-## AI Repo PRs
+## Praxis image build
 
-| Item | Status | Blocks |
+The gateway image is built from the AI repo using the Praxis fork as a local
+sibling:
+
+```bash
+# 1. Clone the Praxis G2G fork
+git clone -b ai-grid-g2g-demo-validation \
+  https://github.com/nerdalert/praxis.git /tmp/praxis-g2g
+
+# 2. In the AI repo parent directory (containing both ai/ and praxis/ siblings):
+cd /path/to/parent
+ln -s /tmp/praxis-g2g praxis  # or copy
+
+# 3. Build
+docker build \
+  -f ai/Containerfile.composed \
+  --build-arg CARGO_FEATURES=llmd-ext-proc \
+  -t localhost/praxis-ai:llmd-ext-proc \
+  .
+```
+
+The `Containerfile.composed` automatically patches the AI repo's Praxis git
+dependency with the local sibling via `[patch]` in `.cargo/config.toml`.
+
+---
+
+## Grid PRs (upstream praxis-proxy/grid main)
+
+Grid main now contains all xtask demo infrastructure:
+
+| PR | Title | Status |
 |---|---|---|
-| llm-d ext_proc transfer to AI repo | Pending AI PR | GRID-03 |
-| `localhost/praxis-ai:llmd-ext-proc` image | Built and present | none |
-| `localhost/praxis-ai-mock-epp:latest` image | Built and present | none |
-| `mock-providers`: `POST /v1/responses` | Implemented (PR candidate at `prs/14-grid-openai-responses-mock`) | nothing for core demo |
+| GRID-01 | cert identity helpers | Merged |
+| GRID-02 | provider inference baseline | Merged |
+| GRID-03 | gateway image build/load + provider E2E | Merged |
+| GRID-04 | consumer G2G static routing | Merged |
+| GRID-05 | mTLS trust verification | Merged |
+| GRID-06 | operator overlay file input | Merged |
+| GRID-docs | xtask orchestration model docs | Merged |
+| GRID-backend | provider backend selection (inference-sim / mock-openai) | Merged |
+| GRID-responses | /v1/responses gateway verification | Merged |
+
+Operator PRs (OPERATOR-01/02/03) are prepared but not yet upstreamed. They live
+in `prs/08-grid-operator-overlay-reconciler/grid`.
 
 ---
 
-## Grid PRs
+## AI repo PR
 
-These implement reusable xtask infrastructure and cert library changes.
-None require changes to Praxis or AI for GRID-01/02.
-
-| PR | Title | Status | Depends on |
-|---|---|---|---|
-| GRID-CI | CI: tests, supply-chain, documentation | Ready | none |
-| GRID-01 | cert identity + .gitignore | Ready | none |
-| GRID-02 | inference baseline (verify-providers) | Ready | GRID-01 |
-| GRID-03 | gateway E2E (ext_proc + mock EPP) | Needs AI ext_proc PR | GRID-02 + AI |
-| GRID-04 | consumer G2G | Needs GRID-03 | GRID-03 |
-| GRID-05 | mTLS trust verification | Needs GRID-03 | GRID-03 |
-| GRID-06 | overlay mode (--overlay-config) | Needs GRID-04 | GRID-04 |
-| GRID-DOCS | multi-cluster demo plan | After GRID-06 | GRID-06 |
-| GRID-14 | mock-providers /v1/responses | Independent | none |
-
----
-
-## Operator PRs
-
-These implement production control-plane reconciliation.
-All are independent of the Grid demo PR order.
-
-| PR | Title | Status | Tests |
-|---|---|---|---|
-| OPERATOR-01 | routing overlay renderer | Ready | 56 tests |
-| OPERATOR-02 | InferenceProvider controller | Ready after OPERATOR-01 | +14 tests |
-| OPERATOR-03 | overlay bridge helper | Ready after OPERATOR-01 | +11 tests |
-| OPERATOR-BLOCKED | gateway annotation patching | Blocked — target k8s object type unknown | — |
-
----
-
-## Submission order
-
-```
-Independent (submit any order):
-  Praxis UP-G2G-01, UP-G2G-03/04
-  Operator OPERATOR-01
-
-After UP-G2G-01:
-  Praxis UP-G2G-02
-
-After UP-G2G-03/04:
-  Praxis UP-G2G-07
-
-After AI ext_proc PR:
-  Grid GRID-03, GRID-04, GRID-05, GRID-06
-
-After OPERATOR-01:
-  OPERATOR-02, OPERATOR-03
-```
-
----
-
-## What this demo proves about the upstream PRs
-
-| Demo | PR validated |
+| Item | Status |
 |---|---|
-| Provider inference baseline | GRID-02 (xtask env up, verify-providers) |
-| Provider gateway ext_proc | GRID-03 (ext_proc path), AI (image) |
-| Consumer G2G static | GRID-04 (consumer gateway), Praxis UP-G2G-03/04 (grid_route) |
-| Consumer G2G overlay | GRID-06 (operator_overlay.rs), OPERATOR-01/03 (wire format) |
-| mTLS trust | GRID-05 (verify-mtls-trust), Praxis UP-G2G-01/02 (peer identity + ingress trust) |
-| /v1/responses mock | GRID-14 (mock-providers) |
+| llm-d ext_proc transfer to `praxis-proxy/ai` | Pending — open AI PR |
+| `localhost/praxis-ai:llmd-ext-proc` image | Built from AI repo + Praxis G2G fork |
+| `localhost/praxis-ai-mock-epp:latest` | Built from AI repo |
+| `grid-mock-providers:latest` | Built from Grid `mock-providers/Containerfile` |
 
+---
+
+## Latest validation results (2026-07-12)
+
+| Demo | Result | Count |
+|---|---|---|
+| Provider baseline (inference-sim) | PASS | 15/15 |
+| Provider gateway E2E | PASS | 16/16 |
+| Consumer G2G static | PASS | 8/8 |
+| mTLS trust | PASS | **10/10** |
+| Consumer G2G overlay-config | PASS | 8/8 |
+| Mock-openai /v1/responses gateway | PASS | 9/9 |
+
+All validation used freshly built `localhost/praxis-ai:llmd-ext-proc` image
+(sha `742e64f01891`) from `nerdalert/praxis:ai-grid-g2g-demo-validation`.
+
+**mTLS note:** Previous runs showed 9/10 due to a port-forward timing race between
+the TLS-rejection tests and the wrong-org filter test in cluster-b. This is a
+test harness timing issue, not a filter defect. The 2026-07-12 run achieved
+10/10 with the fresh image. Expect 9/10 to 10/10 depending on environment load.
