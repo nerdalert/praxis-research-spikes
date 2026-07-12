@@ -13,7 +13,7 @@
 # Prerequisites: bash scripts/check-prereqs.sh
 set -euo pipefail
 
-GRID_REPO="${GRID_REPO:-${HOME}/praxxis/ai-grid/grid}"
+GRID_REPO="${GRID_REPO:-${HOME}/grid}"
 CARGO="${CARGO:-cargo}"
 TOOLCHAIN="${TOOLCHAIN:-+1.96.0}"
 OVERLAY_CONFIG="${OVERLAY_CONFIG:-/tmp/grid-demo-overlay.json}"

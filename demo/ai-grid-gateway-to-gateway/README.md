@@ -37,9 +37,9 @@ Client → cluster-c (consumer) → mTLS → cluster-a or cluster-b (provider)
 
 | Repo | Branch | What it provides |
 |---|---|---|
-| `praxis-proxy/grid` | `main` (dirty worktree: `prs/` dirs) | xtask commands, certs, operator |
+| `praxis-proxy/grid` | `main` | xtask commands, certs, operator |
 | `praxis-proxy/ai` | `llmd-ext-proc` build | gateway image, ext_proc, mock EPP |
-| `praxis-proxy/praxis` | extraction worktrees at `prs/04-07-*` | `grid_route`, `grid_ingress_trust` filters |
+| `praxis-proxy/praxis` | `main` + extraction branches | `grid_route`, `grid_ingress_trust` filters |
 | This repo | `codex/gateway-to-gateway-demo` | demo assets (this directory) |
 
 ---
@@ -52,7 +52,7 @@ Client → cluster-c (consumer) → mTLS → cluster-a or cluster-b (provider)
 | kubectl | present |
 | Docker or Podman | 29.x |
 | Rust stable toolchain | 1.96.0 (`cargo +1.96.0`) |
-| Grid repo at `GRID_REPO` | `/home/ubuntu/praxxis/ai-grid/grid` (default) |
+| Grid repo at `GRID_REPO` | set to your local `praxis-proxy/grid` checkout |
 | `localhost/praxis-ai:llmd-ext-proc` image | built via `env build-gateway-images` |
 | `localhost/praxis-ai-mock-epp:latest` image | built via `env build-gateway-images` |
 
@@ -232,9 +232,6 @@ belong here** (`nerdalert/praxis-research-spikes/demo/ai-grid-gateway-to-gateway
 - presenter walkthrough and Q&A
 - slide-deck alignment
 - demo-specific status tracking
-
-Do not commit production planning notes, implementation code, or non-demo
-config to this directory.
 
 ---
 

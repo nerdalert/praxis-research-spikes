@@ -3,7 +3,7 @@
 # Safe to run even if env up was not completed.
 set -euo pipefail
 
-GRID_REPO="${GRID_REPO:-${HOME}/praxxis/ai-grid/grid}"
+GRID_REPO="${GRID_REPO:-${HOME}/grid}"
 CARGO="${CARGO:-cargo}"
 TOOLCHAIN="${TOOLCHAIN:-+1.96.0}"
 

@@ -25,7 +25,7 @@ check "docker is installed"        "command -v docker || command -v podman"
 check "curl is installed"          "command -v curl"
 check "Rust 1.96.0 toolchain"      "rustup show active-toolchain | grep -q 1.96 || cargo +1.96.0 --version"
 
-GRID_REPO="${GRID_REPO:-${HOME}/praxxis/ai-grid/grid}"
+GRID_REPO="${GRID_REPO:-${HOME}/grid}"
 check "Grid repo exists at GRID_REPO" "test -d '${GRID_REPO}/xtask'"
 
 check "praxis-ai:llmd-ext-proc image" \
