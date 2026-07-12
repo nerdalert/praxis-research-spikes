@@ -1,0 +1,27 @@
+{
+  "network": "ai-grid-demo",
+  "local_site": "cluster-c",
+  "candidates": [
+    {
+      "kind": "inference_model",
+      "name": "granite-3.3-8b",
+      "site": "cluster-a",
+      "cluster": "provider-a",
+      "fresh": true
+    },
+    {
+      "kind": "inference_model",
+      "name": "mistral-7b",
+      "site": "cluster-a",
+      "cluster": "provider-a",
+      "fresh": true
+    },
+    {
+      "kind": "inference_model",
+      "name": "llama-3.2-8b",
+      "site": "cluster-b",
+      "cluster": "provider-b",
+      "fresh": true
+    }
+  ]
+}

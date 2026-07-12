@@ -26,6 +26,14 @@ large-prompt body handling, GuideLLM simulator echo, and analysis.
 
 ## Other Demos
 
+### [AI Grid Gateway-to-Gateway Demo](demo/ai-grid-gateway-to-gateway/)
+
+Validates the AI Grid multi-cluster data-plane architecture using three kind
+clusters. Proves provider inference baseline, provider gateway ext_proc / llm-d
+path, consumer-to-provider gateway routing over mTLS, mTLS trust enforcement
+with `grid_ingress_trust`, and operator overlay-driven routing via
+`--overlay-config`. Uses `cargo xtask` commands against the Grid repo.
+
 ### [Gateway-to-Gateway Routing E2E](demo/gateway-to-gateway-routing/)
 
 Validation workspace for the gateway-to-gateway connectivity, metadata, and
