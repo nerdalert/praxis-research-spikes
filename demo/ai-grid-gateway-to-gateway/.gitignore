@@ -1,0 +1,6 @@
+# Generated during demo runs — do not commit
+*.log
+*.pid
+.pids/
+.logs/
+demo-output.md
