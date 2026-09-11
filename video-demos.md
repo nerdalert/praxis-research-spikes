@@ -24,4 +24,7 @@ https://github.com/user-attachments/assets/75bb9880-236d-4712-9e18-712a60818839
 
 https://github.com/user-attachments/assets/ab6b3166-7ddc-4b4f-999e-b4fbeede8c7c
 
+## Praxis Grid Weighted Routing
+
+https://github.com/user-attachments/assets/f7eed09f-8b97-4e54-9740-8e1cae74d4f1
 
