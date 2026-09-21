@@ -28,5 +28,9 @@ https://github.com/user-attachments/assets/ab6b3166-7ddc-4b4f-999e-b4fbeede8c7c
 
 https://github.com/user-attachments/assets/32fc68cc-e866-4a8b-a486-3f621364dd7e
 
+## Praxis Per-app token budgets with token_rate_limit, mixed algorithms per rule
+
+https://github.com/user-attachments/assets/4fc6f22a-a025-4379-8513-21ee0c6ab156
+
 
 
