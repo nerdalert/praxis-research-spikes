@@ -87,15 +87,15 @@ The qualification must continue to require `PRAXIS_AI_IMAGE` to be set.
 
 Required spike images:
 
-1. `ghcr.io/nerdalert/maas-praxis-v3-praxis`
+1. `ghcr.io/nerdalert/praxis@sha256:ca819d26f16bb04949c773248b34ca3eb56f58c20406bb47f396319f3c6a10df`
    - Praxis plus the Praxis AI changes used by this spike.
 2. `ghcr.io/nerdalert/praxis-maas-authz-bridge@sha256:ab62af696f9e071f9edfcd1666b7d066ec330d80325d4ed18c89968d93767e0c`
    - Temporary Authorino/Limitador adapter used only by the demo.
-3. `ghcr.io/nerdalert/maas-praxis-v3-provider-fixture`
+3. `ghcr.io/nerdalert/maas-praxis-v3-provider-fixture@sha256:<provider-fixture-digest>`
    - Deterministic HTTPS ExternalModel Provider A/B fixture.
-4. `ghcr.io/nerdalert/maas-praxis-v3-ai-gateway-controller`
+4. `ghcr.io/nerdalert/maas-praxis-v3-ai-gateway-controller@sha256:<controller-digest>`
    - Controller build containing the V3 spike changes needed by the demo.
-5. `ghcr.io/nerdalert/maas-praxis-v3-runtime-reconciler`
+5. `ghcr.io/nerdalert/maas-praxis-v3-runtime-reconciler@sha256:<reconciler-digest>`
    - Temporary in-cluster snapshot compiler. This replaces the current
      host-running reconciliation script for a portable demo and is not the
      intended product implementation.
@@ -196,28 +196,6 @@ Evidence must include the image/source provenance, route and Service identity,
 backend-contact counters, response status, provider attribution, streaming
 timestamps, and cleanup verification. It must contain no credential values,
 tokens, private keys, kubeconfigs, or unsanitized local paths.
-
-## Source Repositories
-
-Development forks required for the spike and its likely product path:
-
-- [`nerdalert/praxis`](https://github.com/nerdalert/praxis)
-- [`nerdalert/ai`](https://github.com/nerdalert/ai)
-- [`nerdalert/ai-gateway-controller`](https://github.com/nerdalert/ai-gateway-controller)
-- `nerdalert/ai-gateway-operator` (fork still required)
-- [`nerdalert/models-as-a-service`](https://github.com/nerdalert/models-as-a-service)
-- [`nerdalert/praxis-research-spikes`](https://github.com/nerdalert/praxis-research-spikes)
-
-Keep KServe, Kuadrant Operator, Authorino, Limitador, cert-manager, Istio, and
-MetalLB as pinned upstream dependencies unless the spike demonstrates a real
-upstream change is necessary. Existing personal mirrors may be useful for
-experimentation but are not required inputs to the reproducible demo.
-
-The selected scheduler direction also treats
-`llm-d/llm-d-inference-scheduler` and
-`kubernetes-sigs/gateway-api-inference-extension` as pinned upstream
-dependencies. Do not fork either repository unless qualification identifies a
-specific defect that cannot be corrected in Praxis or its controller.
 
 ## Explicitly excluded from this demo
 
