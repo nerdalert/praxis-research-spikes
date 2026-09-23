@@ -271,6 +271,17 @@ option is researched behind a separate feature flag and requirements document.
 Praxis forwards an authorized request to the Service generated for an ordinary,
 no-scheduler `LLMInferenceService`.
 
+```text
+Client
+    -> Praxis tenant gateway
+    -> Authorino authentication and model authorization
+    -> Limitador quota check
+    -> Praxis applies the KServe HTTPRoute path rewrite
+    -> KServe-generated model Service
+    -> Model-serving pod, such as vLLM
+    -> Praxis streams the response to the client
+```
+
 Praxis must recognize its GatewayClass, compile the required listeners and
 HTTPRoutes, resolve Service references, perform the required path rewrite, and
 report status based on configuration actually loaded by the serving replicas.
