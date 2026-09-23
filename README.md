@@ -1,5 +1,14 @@
 # Praxis Research Spikes
 
+## MaaS/Praxis V3 Service-path demo
+
+The [portable MaaS/Praxis V3 demo](demo/maas-praxis-v3/) qualifies Praxis as
+the Envoy replacement for the default MaaS inference paths: a normal
+KServe-generated Service and an ExternalModel provider coexist on one Praxis
+listener, with Authorino and Limitador remaining authoritative. EPP,
+InferencePool, scheduler, Envoy forwarding, and token settlement are separate
+follow-on work.
+
 This repository collects research spikes and implementation demos for Praxis.
 
 ## llm-d Integration PoC
