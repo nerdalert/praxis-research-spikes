@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../maas-controller-overlay
+patches:
+  - patch: |-
+      $patch: delete
+      apiVersion: monitoring.coreos.com/v1
+      kind: ServiceMonitor
+      metadata:
+        name: maas-controller-metrics
+        namespace: maas-praxis-system
+    target:
+      group: monitoring.coreos.com
+      version: v1
+      kind: ServiceMonitor
+      name: maas-controller-metrics
+  - patch: |-
+      apiVersion: admissionregistration.k8s.io/v1
+      kind: ValidatingWebhookConfiguration
+      metadata:
+        name: maas-validating-webhook-configuration
+        annotations:
+          service.beta.openshift.io/inject-cabundle: null
+          cert-manager.io/inject-ca-from: maas-praxis-system/maas-controller-webhook-server
+    target:
+      group: admissionregistration.k8s.io
+      version: v1
+      kind: ValidatingWebhookConfiguration
+      name: maas-validating-webhook-configuration

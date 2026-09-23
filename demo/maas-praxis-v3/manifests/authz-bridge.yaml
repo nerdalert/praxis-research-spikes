@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: praxis-maas-authz
+  namespace: models-as-a-service
+  labels:
+    app: praxis-maas-authz
+    run-id: poc-e2e-20260922-utc
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: praxis-maas-authz
+  template:
+    metadata:
+      labels:
+        app: praxis-maas-authz
+        run-id: poc-e2e-20260922-utc
+    spec:
+      containers:
+        - name: bridge
+          image: praxis-maas-authz-bridge:poc-e2e-20260922
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: POLICY_CONFIG
+              value: /etc/policy/policy.json
+            - name: AUTH_HOST_SCOPE
+              value: "a4a7c595ae35aea207c9456f5b9ed2d1e2a5f233f720a74ac06cd08c1adbdd96"
+            - name: LIMIT_DOMAIN
+              value: "llm-internal/praxis-epp-kserve-route"
+            - name: LIMIT_DESCRIPTOR_KEY
+              value: "tokenlimit.models_as_a_service_praxis_subscription_praxis_epp_tokens__1e099ef8"
+            - name: LIMIT_DESCRIPTOR_VALUE
+              value: "1"
+            - name: SIM_AUTH_HOST_SCOPE
+              value: "7612d98434ee00bda5ad41799d21d8e7fc5fe2775a42fe97128b66254fb5f57b"
+            - name: SIM_LIMIT_DOMAIN
+              value: "llm-internal/praxis-sim-kserve-route"
+            - name: SIM_LIMIT_DESCRIPTOR_KEY
+              value: "tokenlimit.models_as_a_service_praxis_subscription_praxis_sim_tokens__da38c44a"
+            - name: SIM_LIMIT_DESCRIPTOR_VALUE
+              value: "1"
+            - name: EXTERNAL_AUTH_HOST_SCOPE
+              value: "1920a457ad04e64d65e191fd8af780ad71d1915d435ae4914688f7ce8702b38e"
+            - name: EXTERNAL_LIMIT_DOMAIN
+              value: "models-as-a-service/praxis-external"
+            - name: EXTERNAL_LIMIT_DESCRIPTOR_KEY
+              value: "tokenlimit.models_as_a_service_praxis_external_subscription_praxis_external_tokens__76e8dd7b"
+            - name: EXTERNAL_LIMIT_DESCRIPTOR_VALUE
+              value: "1"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          volumeMounts:
+            - name: policy
+              mountPath: /etc/policy
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: policy
+          configMap:
+            name: praxis-runtime-snapshot
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: praxis-maas-authz
+  namespace: models-as-a-service
+  labels:
+    app: praxis-maas-authz
+    run-id: poc-e2e-20260922-utc
+spec:
+  selector:
+    app: praxis-maas-authz
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

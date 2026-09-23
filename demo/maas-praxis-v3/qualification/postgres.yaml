@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-creds
+  namespace: maas-praxis-system
+type: Opaque
+stringData:
+  POSTGRES_USER: maas
+  POSTGRES_PASSWORD: cold-local-only
+  POSTGRES_DB: maas
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: maas-praxis-system
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: postgres}}
+  template:
+    metadata: {labels: {app: postgres}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: postgres
+        image: postgres:16-alpine
+        envFrom: [{secretRef: {name: postgres-creds}}]
+        ports: [{name: postgres, containerPort: 5432}]
+        readinessProbe: {exec: {command: [pg_isready, -U, maas, -d, maas]}, initialDelaySeconds: 2}
+        # The official image entrypoint must chmod/chown its data directory before
+        # dropping to the postgres user. Keep the fixture isolated and tokenless,
+        # but do not remove the capability it needs for initialization.
+        securityContext: {allowPrivilegeEscalation: false}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: maas-praxis-system
+spec:
+  selector: {app: postgres}
+  ports: [{name: postgres, port: 5432, targetPort: postgres}]
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: maas-db-config
+  namespace: maas-praxis-system
+type: Opaque
+stringData:
+  DB_CONNECTION_URL: postgres://maas:cold-local-only@postgres.maas-praxis-system.svc.cluster.local:5432/maas?sslmode=disable

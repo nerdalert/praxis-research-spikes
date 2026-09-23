@@ -78,6 +78,14 @@ Build and publish those images from the linked source branch, then pass the
 resulting digest-pinned references explicitly. The evidence must include the
 image reference, source repository, branch, commit, and observed Pod digest.
 
+For contributor validation before those two fixture images are published, use
+the explicit source-build switch. This is not the reproducibility default and
+does not permit an implicit fallback:
+
+```bash
+./scripts/run-demo.sh ... --build-local-fixtures
+```
+
 For the currently qualified Praxis image:
 
 ```bash
@@ -125,9 +133,10 @@ revocation result.
 
 ## Provisioning and command contract
 
-The portable runner delegates to the source-matched cold provisioner while
-keeping the image input and run/cleanup boundary in this repository. These
-commands are the reproducibility contract for the default Service path:
+The portable runner bootstraps the pinned source revisions into a temporary
+workspace, then runs the checked-in cold provisioner. No sibling checkout or
+developer filesystem path is required. These commands are the reproducibility
+contract for the default Service path:
 
 ```bash
 RUN_ID="maas-v3-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -139,6 +148,8 @@ export PRAXIS_AI_IMAGE='<required digest-pinned Praxis AI image>'
   --run-id "$RUN_ID" \
   --praxis-ai-image "$PRAXIS_AI_IMAGE" \
   --authz-bridge-image 'ghcr.io/nerdalert/praxis-maas-authz-bridge@sha256:ab62af696f9e071f9edfcd1666b7d066ec330d80325d4ed18c89968d93767e0c' \
+  --provider-fixture-image 'ghcr.io/nerdalert/maas-praxis-v3-provider-fixture@sha256:<provider-fixture-digest>' \
+  --controller-image 'ghcr.io/nerdalert/maas-praxis-v3-ai-gateway-controller@sha256:<controller-digest>' \
   --evidence-dir "$EVIDENCE_DIR"
 
 # For diagnosis only: retain run-owned resources after a failure.
@@ -146,6 +157,8 @@ export PRAXIS_AI_IMAGE='<required digest-pinned Praxis AI image>'
   --run-id "$RUN_ID" \
   --praxis-ai-image "$PRAXIS_AI_IMAGE" \
   --authz-bridge-image 'ghcr.io/nerdalert/praxis-maas-authz-bridge@sha256:ab62af696f9e071f9edfcd1666b7d066ec330d80325d4ed18c89968d93767e0c' \
+  --provider-fixture-image 'ghcr.io/nerdalert/maas-praxis-v3-provider-fixture@sha256:<provider-fixture-digest>' \
+  --controller-image 'ghcr.io/nerdalert/maas-praxis-v3-ai-gateway-controller@sha256:<controller-digest>' \
   --evidence-dir "$EVIDENCE_DIR" \
   --retain-on-failure
 

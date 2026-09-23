@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: provider-a-fixture
+  namespace: maas-praxis-system
+  labels: {app: praxis-provider-fixture, provider: provider-a, run-id: poc-e2e-20260922-utc}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: praxis-provider-fixture, provider: provider-a}}
+  template:
+    metadata: {labels: {app: praxis-provider-fixture, provider: provider-a, run-id: poc-e2e-20260922-utc}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: provider
+          image: provider-fixture:poc-e2e-20260922
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: PROVIDER_ID, value: provider-a}
+            - {name: EXPECTED_API_KEY, value: provider-a-strict-key}
+          ports: [{name: https, containerPort: 8443}]
+          volumeMounts: [{name: tls, mountPath: /tls, readOnly: true}]
+          readinessProbe: {tcpSocket: {port: https}, initialDelaySeconds: 1}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+      volumes: [{name: tls, secret: {secretName: provider-a-tls}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: provider-a-fixture
+  namespace: maas-praxis-system
+  labels: {app: praxis-provider-fixture, provider: provider-a, run-id: poc-e2e-20260922-utc}
+spec:
+  selector: {app: praxis-provider-fixture, provider: provider-a}
+  ports: [{name: https, port: 443, targetPort: https}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: provider-b-fixture
+  namespace: maas-praxis-system
+  labels: {app: praxis-provider-fixture, provider: provider-b, run-id: poc-e2e-20260922-utc}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: praxis-provider-fixture, provider: provider-b}}
+  template:
+    metadata: {labels: {app: praxis-provider-fixture, provider: provider-b, run-id: poc-e2e-20260922-utc}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: provider
+          image: provider-fixture:poc-e2e-20260922
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: PROVIDER_ID, value: provider-b}
+            - {name: EXPECTED_API_KEY, value: provider-b-strict-key}
+          ports: [{name: https, containerPort: 8443}]
+          volumeMounts: [{name: tls, mountPath: /tls, readOnly: true}]
+          readinessProbe: {tcpSocket: {port: https}, initialDelaySeconds: 1}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+      volumes: [{name: tls, secret: {secretName: provider-b-tls}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: provider-b-fixture
+  namespace: maas-praxis-system
+  labels: {app: praxis-provider-fixture, provider: provider-b, run-id: poc-e2e-20260922-utc}
+spec:
+  selector: {app: praxis-provider-fixture, provider: provider-b}
+  ports: [{name: https, port: 443, targetPort: https}]
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
+metadata:
+  name: provider-a
+  namespace: models-as-a-service
+  labels: {run-id: poc-e2e-20260922-utc}
+spec:
+  provider: openai
+  endpoint: provider-a-fixture.maas-praxis-system.svc.cluster.local
+  auth: {type: apikey, secretRef: {name: provider-a-credentials}}
+  config: {tls.sni: provider-a.maas-praxis-system.svc.cluster.local}
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalProvider
+metadata:
+  name: provider-b
+  namespace: models-as-a-service
+  labels: {run-id: poc-e2e-20260922-utc}
+spec:
+  provider: openai
+  endpoint: provider-b-fixture.maas-praxis-system.svc.cluster.local
+  auth: {type: apikey, secretRef: {name: provider-b-credentials}}
+  config: {tls.sni: provider-b.maas-praxis-system.svc.cluster.local}
+---
+apiVersion: inference.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: praxis-external
+  namespace: models-as-a-service
+  labels: {run-id: poc-e2e-20260922-utc}
+spec:
+  modelName: praxis-external
+  externalProviderRefs:
+    - ref: {name: provider-a}
+      targetModel: praxis-external
+      apiFormat: openai-chat
+      path: /v1/chat/completions
+      config: {tls.caCertificates: /etc/praxis/provider-ca/ca.crt, tls.sni: provider-a.maas-praxis-system.svc.cluster.local}
+      weight: 1
+    - ref: {name: provider-b}
+      targetModel: praxis-external
+      apiFormat: openai-chat
+      path: /v1/chat/completions
+      config: {tls.caCertificates: /etc/praxis/provider-ca/ca.crt, tls.sni: provider-b.maas-praxis-system.svc.cluster.local}
+      weight: 0

@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: maas-gateway-tls
+  namespace: maas-praxis-gateway
+spec:
+  secretName: maas-gateway-tls
+  issuerRef:
+    name: maas-selfsigned-issuer
+    kind: ClusterIssuer
+  dnsNames:
+    - maas-default-gateway-istio.maas-praxis-gateway.svc
+    - maas-default-gateway-istio.maas-praxis-gateway.svc.cluster.local

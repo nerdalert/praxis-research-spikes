@@ -1,0 +1,139 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: praxis-service-poc-config
+  namespace: models-as-a-service
+  labels:
+    app: praxis-service-poc
+data:
+  praxis.yaml: |
+    listeners:
+      - name: inference
+        address: "0.0.0.0:8080"
+        filter_chains: [maas-auth-and-service-route]
+    filter_chains:
+      - name: maas-auth-and-service-route
+        filters:
+          - filter: model_to_header
+            name: classify-for-auth
+            header: X-Gateway-Model-Name
+          - filter: llmisvc_model_provider_resolver
+            header: X-Gateway-Model-Name
+            max_body_bytes: 1048576
+          - filter: http_callout
+            target:
+              url: "http://praxis-maas-authz.models-as-a-service.svc.cluster.local:8080/v1/chat/completions"
+              allow_private_addresses: true
+              timeout: "3s"
+              forward_headers: [Authorization, Content-Type, X-Gateway-Model-Name]
+            request: {phase: request_headers, max_body_bytes: 1048576}
+            response: {extract: [{json_path: "$.decision", result_key: decision}]}
+            on_failure: closed
+            status_on_error: 503
+            branch_chains:
+              - name: unauthenticated
+                on_result: {filter: http_callout, key: decision, result: "unauthenticated"}
+                rejoin: terminal
+                chains: [{name: reject-unauthenticated, filters: [{filter: static_response, status: 401, body: '{"error":"unauthorized"}'}]}]
+              - name: forbidden
+                on_result: {filter: http_callout, key: decision, result: "forbidden"}
+                rejoin: terminal
+                chains: [{name: reject-forbidden, filters: [{filter: static_response, status: 403, body: '{"error":"forbidden"}'}]}]
+              - name: quota
+                on_result: {filter: http_callout, key: decision, result: "quota"}
+                rejoin: terminal
+                chains: [{name: reject-quota, filters: [{filter: static_response, status: 429, body: '{"error":"rate limit exceeded"}'}]}]
+              - name: sim-authorized
+                on_result: {filter: http_callout, key: decision, result: "allowed-sim"}
+                rejoin: terminal
+                chains:
+                  - name: direct-kserve-service
+                    filters:
+                      - filter: headers
+                        request_remove: [Authorization, X-Api-Key, X-Gateway-Model-Name]
+                      # KServe's generated Service is the direct workload
+                      # target, but its canonical route prefix is part of the
+                      # serving contract. Preserve that rewrite when Praxis
+                      # bypasses the Gateway implementation.
+                      - filter: path_rewrite
+                        # Replaced by cold-run.sh from the KServe-generated
+                        # HTTPRoute.  Keeping the value out of this source
+                        # prevents a model/service fixture name from becoming
+                        # a routing contract.
+                        replace:
+                          pattern: "^/v1/chat/completions$"
+                          replacement: __KSERVE_BACKEND_PATH__
+                      - filter: router
+                        routes:
+                          - {path_prefix: "/", cluster: kserve-service-praxis-sim}
+                      - filter: load_balancer
+                        clusters:
+                          - name: kserve-service-praxis-sim
+                            endpoints: [praxis-sim-kserve-workload-svc.llm-internal.svc.cluster.local:8000]
+              - name: external-authorized
+                on_result: {filter: http_callout, key: decision, result: "allowed-external"}
+                rejoin: terminal
+                chains:
+                  - name: direct-provider
+                    filters:
+                      - filter: intelligent_route
+                        overlay_file: /etc/praxis/routing/routing-overlay.json
+                        model_header: X-Gateway-Model-Name
+                        reload: {enabled: true, debounce_ms: 200}
+                      - filter: credential_inject
+                        credentials:
+                          - {name: provider-a-credentials, namespace: models-as-a-service, key: api-key, strategy: bearer_token, file: /etc/praxis/provider-credentials/provider-a/api-key}
+                          - {name: provider-b-credentials, namespace: models-as-a-service, key: api-key, strategy: bearer_token, file: /etc/praxis/provider-credentials/provider-b/api-key}
+                      - filter: load_balancer
+                        clusters:
+                          - name: provider-provider-a
+                            tls: {sni: provider-a.maas-praxis-system.svc.cluster.local, ca: {ca_path: /etc/praxis/provider-ca/ca.crt}}
+                            endpoints: [provider-a-fixture.maas-praxis-system.svc.cluster.local:443]
+                          - name: provider-provider-b
+                            tls: {sni: provider-b.maas-praxis-system.svc.cluster.local, ca: {ca_path: /etc/praxis/provider-ca/ca.crt}}
+                            endpoints: [provider-b-fixture.maas-praxis-system.svc.cluster.local:443]
+          - filter: headers
+            request_remove: [Authorization, X-Api-Key, X-Gateway-Model-Name]
+    insecure_options: {allow_private_endpoints: true, allow_private_upstreams: true}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: praxis-service-poc
+  namespace: models-as-a-service
+  labels: {app: praxis-service-poc}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: praxis-service-poc}}
+  template:
+    metadata: {labels: {app: praxis-service-poc}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: praxis
+          image: praxis-ai-service-poc:poc-e2e
+          imagePullPolicy: IfNotPresent
+          args: ["-c", /etc/praxis/praxis.yaml]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {tcpSocket: {port: http}, initialDelaySeconds: 2}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: config, mountPath: /etc/praxis/praxis.yaml, subPath: praxis.yaml, readOnly: true}
+            - {name: routing, mountPath: /etc/praxis/routing, readOnly: true}
+            - {name: provider-credentials, mountPath: /etc/praxis/provider-credentials, readOnly: true}
+            - {name: provider-ca, mountPath: /etc/praxis/provider-ca, readOnly: true}
+      volumes:
+        - {name: config, configMap: {name: praxis-service-poc-config}}
+        - {name: routing, configMap: {name: routing-overlay}}
+        - {name: provider-credentials, projected: {sources: [{secret: {name: provider-a-credentials, items: [{key: api-key, path: provider-a/api-key}]}}, {secret: {name: provider-b-credentials, items: [{key: api-key, path: provider-b/api-key}]}}]}}
+        - {name: provider-ca, secret: {secretName: provider-ca}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: praxis-service-poc
+  namespace: models-as-a-service
+  labels: {app: praxis-service-poc}
+spec:
+  selector: {app: praxis-service-poc}
+  ports: [{name: http, port: 8080, targetPort: http}]

@@ -1,0 +1,32 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: maas-controller-webhook-server
+  namespace: maas-praxis-system
+spec:
+  commonName: maas-controller-webhook-service.maas-praxis-system.svc
+  dnsNames:
+    - maas-controller-webhook-service.maas-praxis-system.svc
+    - maas-controller-webhook-service.maas-praxis-system.svc.cluster.local
+  secretName: maas-controller-webhook-cert
+  issuerRef:
+    name: maas-ca-issuer
+    kind: Issuer
+  duration: 8760h
+  renewBefore: 720h
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: maas-controller-metrics
+  namespace: maas-praxis-system
+spec:
+  secretName: maas-controller-metrics-tls
+  issuerRef:
+    name: maas-ca-issuer
+    kind: Issuer
+  duration: 2160h
+  renewBefore: 360h
+  dnsNames:
+    - maas-controller-metrics.maas-praxis-system.svc
+    - maas-controller-metrics.maas-praxis-system.svc.cluster.local

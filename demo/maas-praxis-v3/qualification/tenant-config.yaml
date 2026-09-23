@@ -1,0 +1,8 @@
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaasTenantConfig
+metadata:
+  name: default-tenant
+  namespace: models-as-a-service
+  annotations:
+    maas.opendatahub.io/payload-processing-type: praxis
+spec: {}

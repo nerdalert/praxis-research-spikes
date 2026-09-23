@@ -1,0 +1,43 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: maas-praxis-system
+
+resources:
+  - ../../ai-gateway-controller/config/self/default
+
+configMapGenerator:
+  - name: ai-gateway-controller-parameters
+    behavior: merge
+    literals:
+      - ai-gateway-controller-image=ai-gateway-controller:__RUN_TAG__
+      - praxis-extproc-image=quay.io/opendatahub/odh-praxis-extproc:odh-stable
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+patches:
+  - target:
+      kind: Deployment
+      name: ai-gateway-controller
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: ai-gateway-controller:__RUN_TAG__
+      - op: replace
+        path: /spec/template/spec/containers/0/args
+        value:
+          - --leader-elect=false
+          - --health-probe-bind-address=:8081
+          - --manifest-path=/config/manifests/external-model/overlays/odh
+          - --resync-interval=30s
+          - --deletion-timeout=2m
+          - --external-model-namespace=
+          - --gateway-name=maas-default-gateway
+          - --gateway-namespace=maas-praxis-gateway
+          - --routing-network=external-model
+          - --routing-local-site=local
+          - --skip-network-policy=true

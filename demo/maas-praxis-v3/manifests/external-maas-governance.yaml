@@ -1,0 +1,37 @@
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSModelRef
+metadata:
+  name: praxis-external
+  namespace: models-as-a-service
+  labels: {run-id: poc-e2e-20260922-utc}
+spec:
+  modelRef: {kind: ExternalModel, name: praxis-external}
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSAuthPolicy
+metadata:
+  name: praxis-access-external
+  namespace: models-as-a-service
+  labels: {run-id: poc-e2e-20260922-utc}
+spec:
+  modelRefs:
+    - {name: praxis-external, namespace: models-as-a-service}
+  subjects:
+    groups: [{name: system:authenticated}]
+    users: []
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSSubscription
+metadata:
+  name: praxis-external-subscription
+  namespace: models-as-a-service
+  labels: {run-id: poc-e2e-20260922-utc}
+spec:
+  owner:
+    groups: [{name: system:authenticated}]
+    users: []
+  priority: 20
+  modelRefs:
+    - name: praxis-external
+      namespace: models-as-a-service
+      tokenRateLimits: [{limit: 100, window: 1m}]
