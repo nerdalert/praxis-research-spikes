@@ -1,17 +1,23 @@
 # MaaS/Praxis V3 Dataplane Research Spike
 
-**Status:** architecture and research direction, September 2026. This is a stab at trying to find any potential future landmines. 
+**Status:** Architecture research and implementation guidance, September 2026.
 
-> Anything in this doc that sounds authoritative, is the model and probably not intended in most cases. This is simply presenting what I've seen working on an end to end PoC with a basic understanding of the v3 integration.
+> This document records findings from an end-to-end prototype. It identifies
+> likely implementation requirements and unresolved decisions; it is not an
+> approved product specification.
 
 ## Summary
 
+The goal is an even dataplane swap for MaaS: replace Envoy with Praxis while
+preserving the MaaS APIs, tenant behavior, model behavior, authorization,
+quota enforcement, routing, streaming, status, and operational expectations
+that users have today. This is not a redesign of MaaS.
+
 V3 makes Praxis the tenant-facing HTTP/TLS proxy and the component that opens
-the final connection to a KServe endpoint or external model provider. Envoy is
+the final connection to a KServe Service or external model provider. Envoy is
 not on either V3 inference request path. The separate ExtProc hop also
-disappears in V3 because the relevant Praxis AI filters execute in the Praxis
-process. This is a data-plane change, **not** a replacement of the MaaS product
-control plane.
+disappears because the relevant Praxis AI filters execute inside Praxis. MaaS
+remains the product control plane.
 
 MaaS continues to own tenants, API keys, subscriptions, model entitlement,
 policy intent, and management APIs. The first migration should keep Authorino
@@ -21,22 +27,20 @@ policy or token limiting is a separate parity program.
 
 ## Current Spike Findings
 
-**In short:** A private Kind spike has demonstrated the intended request shape,
-but its adapters and simulators are research artifacts rather than product
-implementations.
+**In short:** A Kind research prototype has demonstrated the intended request
+shape, but its adapters and simulators are not product implementations.
 
-The strongest current Kind evidence exercises one Praxis listener with three
-routes derived from live cluster state:
+The research spike exercises one Praxis listener with the two routes required
+for the initial MaaS replacement:
 
-- an ordinary KServe Service route;
-- a KServe InferencePool route using the real EPP protocol; and
+- an ordinary KServe Service route; and
 - an ExternalModel route using direct HTTPS provider forwarding.
 
 The observed request path is:
 
 ```text
 Client -> Praxis -> Authorino -> Limitador
-       -> KServe Service, EPP-selected KServe endpoint, or ExternalModel provider
+       -> KServe Service or ExternalModel provider
 ```
 
 The selected paths do not contain an Envoy forwarding hop or a standalone
@@ -46,12 +50,12 @@ header removal, streaming, and final forwarding.
 
 The spike has demonstrated request authentication and entitlement decisions,
 shared request-count quota across two Praxis replicas, direct Service routing,
-EPP endpoint selection, ExternalModel credential replacement, SSE streaming,
+ExternalModel credential replacement, SSE streaming,
 provider updates without a Praxis restart, and denial before backend contact.
 The KServe backend is currently a deterministic simulator rather than a real
 vLLM serving workload.
 
-Cold provisioning now derives the three routes from MaaS, Gateway API,
+Cold provisioning now derives the routes from MaaS, Gateway API,
 Authorino, Limitador, KServe, and ExternalModel resources instead of starting
 with a hard-coded policy table. Provisioning waits for referenced resources
 and generated policy to converge before Praxis starts. While any model is
@@ -71,8 +75,9 @@ The following remain incomplete and must not be implied by a demo result:
 - one final cold run must prove provisioning and the full request/lifecycle
   suite together without manual resource patches.
 
-For KServe, Praxis must implement the Gateway API and InferencePool/EPP
-data-plane contract, including endpoint selection and truthful route status.
+For the default MaaS KServe path, Praxis must implement the Gateway API
+Service-routing contract and truthful route status.
+
 For ExternalModels, Praxis can reuse the established provider resolution,
 overlay, and credential-projection concepts, but must own TLS, authority,
 credential injection, and final forwarding itself. The same tenant Praxis
@@ -83,20 +88,19 @@ gateway must serve both classes without policy or credential crossover.
 **In short:** This phase changes who handles inference traffic. It does not
 change how customers create keys, subscribe to models, or manage tenants.
 
-The first product milestone covers:
+The V3 core milestone covers:
 
 - One tenant Praxis gateway handling MaaS management and protected inference
   routes.
 - Existing MaaS API-key, subscription, model-entitlement, and quota contracts.
-- Ordinary KServe Service routes and scheduler-backed InferencePool routes.
+- Ordinary, no-scheduler KServe Service routes.
 - ExternalModel provider selection and direct HTTPS forwarding.
 - Two Praxis replicas, shared quota state, streaming, configuration updates,
   readiness, isolation, and rollback to the existing Envoy mode.
 
 It does **not** initially require replacing Authorino, Limitador, MaaS APIs,
-KServe APIs, or the Gateway API Inference Extension. Grid/regional routing,
-weighted policy evolution, shared multi-tenant Praxis fleets, and native
-Praxis tokenomics are later work.
+or KServe APIs. Grid/regional routing, weighted policy evolution, shared
+multi-tenant Praxis fleets, and native Praxis tokenomics are later work.
 
 ## Current and Target Topology
 
@@ -114,7 +118,7 @@ flowchart LR
   E --> X[Tenant-local Praxis ExtProc]
   X -->|trusted provider header| E
   E -->|provider route, TLS| P[External provider]
-  E -->|InferencePool / EPP| K[KServe endpoint]
+  E -->|KServe Service route| K[KServe endpoint]
 ```
 
 The V3 target is:
@@ -125,9 +129,7 @@ flowchart LR
   P -->|authz| A[Authorino]
   A --> M[MaaS API]
   P -->|quota| L[Limitador]
-  P -->|endpoint selection| E[EPP]
-  E -->|selected endpoint| P
-  P -->|direct forward| K[KServe endpoint]
+  P -->|direct Service forward| K[KServe endpoint]
   P -->|in-process routing + credentials + TLS| X[External provider]
 ```
 
@@ -147,11 +149,10 @@ turns that intent into configuration, and Praxis serves the request.
 | MaaS API/controller | Tenant, API-key, subscription, model and policy lifecycle; management endpoints. |
 | AI Gateway controller | Compile Gateway, KServe and ExternalModel desired state into a coherent Praxis runtime revision; own its generated resources and status. |
 | Praxis core | Frontend listener/TLS, HTTP routing, streaming, generic external-authz and quota transports, upstream connections and reload safety. |
-| Praxis AI | In-process inference routing, EPP integration where AI-specific, provider credential injection and token-usage extraction. |
+| Praxis AI | In-process inference routing, provider credential injection and token-usage extraction. |
 | Authorino | Existing caller authentication and model/subscription authorization during initial migration. |
 | Limitador | Existing distributed MaaS quota authority during initial migration. |
-| KServe | LLMInferenceService, serving workloads, generated route and InferencePool intent. |
-| EPP | Select an eligible inference endpoint for a pool-backed request. |
+| KServe | LLMInferenceService, serving workloads and generated Service-route intent. |
 | AI Gateway operator | Package images, settings, RBAC and the reversible data-plane selection. |
 
 Only one controller should publish each Praxis runtime configuration. KServe
@@ -162,7 +163,7 @@ it implements. MaaS must not directly write Praxis configuration.
 ## Request Processing Order
 
 **In short:** A request must pass identity, model-access and quota checks
-before Praxis asks EPP or contacts any model or provider.
+before Praxis contacts any model or provider.
 
 The order is a security contract, not merely a preferred filter layout:
 
@@ -178,7 +179,7 @@ frontend TLS and route recognition
 ```
 
 Anonymous, invalid, revoked, unentitled, or quota-denied traffic must not
-contact EPP, KServe, or an external provider. A caller-supplied model,
+contact KServe or an external provider. A caller-supplied model,
 subscription, provider-selection, endpoint-selection, or authenticated-subject
 header must never become trusted state simply because it is present. Preserve
 trusted identity in request-local typed metadata where possible.
@@ -227,7 +228,7 @@ measure the current shipped Kuadrant/Limitador behavior, then preserve:
 
 - Shared counters across Praxis replicas and isolation by trusted subject,
   subscription, tenant and model as specified by MaaS.
-- Denial before EPP or provider contact, with compatible 429 status and
+- Denial before model or provider contact, with compatible 429 status and
   response headers.
 - The actual token-use contract, including reservation before forwarding,
   settlement after response, streaming usage, retries, disconnects and
@@ -264,106 +265,17 @@ cancellation, retries, duplicate settlement, streaming, and partial failure.
 The bridge should remain for the reproducible Kind demo while the embedded
 option is researched behind a separate feature flag and requirements document.
 
-## KServe and InferencePool
+## KServe Service Routing
 
-**In short:** Sending traffic to a KServe Service is straightforward. Matching
-KServe's scheduler behavior also requires Praxis to ask EPP which ready pod to
-use, then connect to that exact pod.
+**In short:** The initial V3 path follows MaaS's default KServe configuration:
+Praxis forwards an authorized request to the Service generated for an ordinary,
+no-scheduler `LLMInferenceService`.
 
-KServe does not need MaaS-specific Praxis code if Praxis implements the
-published Gateway API and Gateway API Inference Extension contracts. The
-controller must recognize its GatewayClass, compile listeners and HTTPRoutes,
-resolve Services and InferencePools, and report status based on loaded state.
-
-### Two V3 EPP integration options
-
-Both options remove Envoy from the selected inference path and remove Praxis
-as a separately deployed ExtProc service. They differ in the scheduler Praxis
-calls and in how much of the ExtProc stream that scheduler consumes.
-
-**Option 1: header-only LWEPP**
-
-```text
-Client -> Praxis native filter pipeline
-       -> modified LWEPP over header-only ExtProc
-       -> Praxis validates and connects to the selected endpoint
-```
-
-The current research implementation sets `request_body_mode=NONE` and asks
-LWEPP to select from request headers. This keeps EPP contact after
-authorization/quota admission and avoids sending the prompt body to the
-scheduler. Upstream LWEPP does not currently complete selection in this mode,
-so the spike carries changes for header-phase selection, KServe health-service
-names, and generated scheduler-argument compatibility. This option is smaller
-and deterministic, but creates a custom scheduler variant that must either be
-upstreamed or maintained.
-
-**Option 2: upstream llm-d EPP**
-
-```text
-Client -> Praxis native filter pipeline
-       -> upstream llm-d EPP over full-duplex streamed ExtProc
-       -> Praxis validates and connects to the selected endpoint
-```
-
-llm-d inference scheduler v0.9.0 expects full-duplex streamed ExtProc request
-and response bodies. Praxis remains the main proxy and acts only as the ExtProc
-client for scheduling; there is still no Envoy hop and no standalone Praxis
-ExtProc workload. The full-duplex processor must be invoked only after
-authentication, authorization, and quota admission so denied traffic never
-reaches EPP. Body streaming must be scoped to this scheduler call rather than
-changing the entire listener to buffered processing.
-
-Option 2 is the selected product direction. Qualification must first prove the
-contract against unmodified upstream llm-d; any incompatibility should be
-isolated before proposing an upstream change. This direction removes the
-custom Gateway API Inference Extension fork and qualifies the scheduler users
-are expected to deploy. Option 1 remains historical evidence and may remain a
-small deterministic test fixture, but it is not a required deployment
-component or the primary demo path.
-
-For an ordinary Service backend, Praxis resolves the Service and forwards to
-the configured port with the required path rewrite. That is the first routing
-slice, **not** InferencePool parity.
-
-For an InferencePool backend:
-
-1. Watch the pool, its `endpointPickerRef`, relevant ready endpoints and
-   target ports. Respect reference and namespace rules.
-2. Call the configured EPP with the versioned external-processing protocol
-   expected by the installed Gateway API Inference Extension.
-3. Accept the selected endpoint only from that trusted EPP result. Ignore
-   caller-provided endpoint-selection headers.
-4. Connect directly to the selected eligible backend. A generic Kubernetes
-   Service round robin must not silently replace the EPP decision.
-5. Define explicit results for missing/unready endpoints, invalid selections,
-   EPP outage, endpoint removal, and a draining connection.
-
-```mermaid
-sequenceDiagram
-  participant C as Client
-  participant P as Praxis
-  participant A as Authorino
-  participant L as Limitador
-  participant E as EPP
-  participant K as KServe endpoint
-  C->>P: Protected inference request
-  P->>A: Authorization check
-  A-->>P: Trusted allow + mutations
-  P->>L: Quota admission
-  L-->>P: Admit
-  P->>E: Endpoint-selection request
-  E-->>P: Selected ready endpoint
-
-  P->>K: Rewritten request, no caller credential
-  K-->>P: JSON or SSE response
-  P-->>C: Stream response
-```
-
-Streaming must preserve time to first chunk, SSE frame order and cancellation.
-Bound request-body inspection and avoid full-response buffering merely to
-extract model or usage fields. Test normal JSON, SSE with usage, SSE without
-usage, client disconnect and backend failure.
+Praxis must recognize its GatewayClass, compile the required listeners and
+HTTPRoutes, resolve Service references, perform the required path rewrite, and
+report status based on configuration actually loaded by the serving replicas.
+It must preserve JSON and SSE streaming, cancellation, backend failure
+handling, and KServe workload readiness without an Envoy forwarding hop.
 
 ### Readiness and status
 
@@ -371,8 +283,8 @@ usage, client disconnect and backend failure.
 `LLMInferenceService Ready`. A positive status should require a usable frontend
 listener/certificate, an accepted route, resolved references, the intended
 Praxis config generation loaded by the expected replicas, and a programmed
-Service/InferencePool/EPP path. KServe consumes Gateway/HTTPRoute/InferencePool
-conditions; false-positive conditions can present a broken model as Ready.
+Service path. KServe consumes Gateway and HTTPRoute conditions; false-positive
+conditions can present a broken model as Ready.
 
 ## ExternalModel Direct Forwarding
 
@@ -439,7 +351,7 @@ consistent snapshot:
 flowchart TB
   M[MaaS tenant, model, policy] --> C[AI Gateway controller]
   G[Gateway + HTTPRoute] --> C
-  K[KServe Service + InferencePool] --> C
+  K[KServe Service] --> C
   X[ExternalModel + ExternalProvider] --> C
   C --> R[Versioned Praxis runtime revision]
   R --> P1[Praxis replica 1]
@@ -478,16 +390,16 @@ scope. Cross-namespace references follow Gateway API and MaaS authorization
 rules; they are not made valid by simply resolving a DNS name.
 
 Frontend and upstream TLS must verify the intended identity. This includes
-Praxis-to-Authorino, Praxis-to-Limitador, Praxis-to-EPP, and
-Praxis-to-provider links, not just client-to-Praxis TLS. Public provider
+Praxis-to-Authorino, Praxis-to-Limitador, and Praxis-to-provider links, not
+just client-to-Praxis TLS. Public provider
 authority and SNI must match the configured hostname. Do not use insecure
 verification flags to make fixtures pass. Endpoint and provider destinations
 need an explicit SSRF/egress policy that still permits legitimate private
 enterprise providers by administrator choice.
 
 No authorization-dependent route should fail open on an adapter error. A
-configuration mismatch, absent policy, unavailable EPP, unknown provider,
-invalid overlay, missing credential, or untrusted selected endpoint must have
+configuration mismatch, absent policy, unknown provider, invalid overlay, or
+missing credential must have
 a bounded, observable fail-closed outcome.
 
 ## Migration and Operator Work
@@ -514,8 +426,8 @@ rollback qualification.
 
 ## Implementation Slices
 
-**In short:** Build the hard compatibility pieces first, add both model paths,
-then prove they work together before replacing the existing gateway.
+**In short:** Complete and qualify the default MaaS KServe Service and
+ExternalModel paths before expanding the dataplane scope.
 
 1. **Policy compatibility:** generic, maintained Authorino `ext_authz` and
    Limitador adapters; generated-policy translation; denial and header
@@ -523,12 +435,10 @@ then prove they work together before replacing the existing gateway.
 2. **Gateway compiler and Service route:** Praxis GatewayClass/listener,
    HTTPRoute, ReferenceGrant and ordinary KServe Service backend with truthful
    conditions and no Envoy hop.
-3. **InferencePool/EPP:** endpoint watches, authenticated EPP interaction,
-   selected-endpoint forwarding, failure and streaming behavior.
-4. **ExternalModel:** direct Praxis provider clusters, in-process routing and
+3. **ExternalModel:** direct Praxis provider clusters, in-process routing and
    credential injection, HTTPS transport, hot updates and cleanup.
-5. **Operational parity:** two replicas, distributed request and token quota
-   contract, config/certificate/credential rotation, audit/metrics,
+4. **V3 core operational parity:** two replicas, distributed request and token
+   quota contract, config/certificate/credential rotation, audit/metrics,
    disconnected packaging, same-Gateway coexistence and rollback.
 
 These may require separate PRs in Praxis core, Praxis AI, AI Gateway
@@ -544,15 +454,14 @@ the same security and model behavior across Kind, OpenShift and RHOAI, including
 failure and rollback cases.
 
 Use one baseline suite against the current Envoy mode and the V3 mode. The
-minimum parity gate includes:
+minimum V3 core gate includes:
 
 - API-key create/use/revoke, wrong-model and cross-tenant denial, and zero
   backend contact for denied requests.
 - Exact caller-credential removal and provider-credential replacement.
 - Request and token quota behavior across two Praxis replicas, including
   actual-use settlement if supported by the product contract.
-- Ordinary KServe Service plus InferencePool/EPP, endpoint lifecycle,
-  no-endpoint and EPP outage.
+- Ordinary no-scheduler KServe Service routing and Service endpoint lifecycle.
 - ExternalModel A/B selection, provider TLS/authority/SNI, override resistance,
   Secret delete/restore and rotation.
 - KServe and ExternalModel coexistence on one tenant Praxis gateway, including
@@ -577,7 +486,6 @@ multiple Praxis replicas safely.
 | --- | --- | --- |
 | Authorino replacement | Retain Authorino | Separate native Praxis auth parity, including MaaS key lifecycle and revocation. |
 | Limitador replacement | Retain Limitador | Distributed token reservation/settlement, failure and policy-update equivalence. |
-| EPP endpoint discovery | Direct endpoint tracking | Churn, readiness, draining and malformed EPP-result tests. |
 | Config transport | One versioned snapshot initially | Two-replica activation and last-known-good chaos tests. |
 | Credential rotation | File reload only if demonstrated; otherwise rollout | Live rotation without leakage or cross-model disruption. |
 | Tenant deployment | One Praxis gateway per tenant initially | Isolation and operational cost before considering a shared fleet. |
@@ -626,60 +534,70 @@ is called release-ready.
    `ResolvedRefs` and `Programmed` reflect per-replica loaded state without
    overwriting KServe-owned LLMInferenceService conditions or another
    Gateway controller's status?
-8. **What is the EPP trust and availability contract?** How does Praxis
-   authenticate EPP, validate its selected endpoint against the current
-   InferencePool, and handle an endpoint that becomes unready between
-   selection and dialing? Is there any permitted fallback, or must it fail
-   closed?
-9. **What constitutes real KServe parity?** Which tests need an actual
-   vLLM/KServe serving workload rather than the deterministic simulator, and
-   which Gateway API Inference Extension conformance tests apply to Praxis?
+8. **What constitutes real KServe Service parity?** Which tests need an actual
+   vLLM/KServe serving workload rather than the deterministic simulator?
 
 ### ExternalModels and runtime state
 
-10. **How is the client-visible model reliably available before route
-    selection?** Body-derived model classification must survive request
-    processing so an ExternalModel request cannot fall through to a KServe
-    route. What phase/typed-metadata contract prevents auth, quota and routing
-    from disagreeing on the model?
-11. **How are provider candidates represented?** Can one provider appear
-    more than once with different paths, target models or credential overrides,
-    and what stable identity joins overlay, credential projection and Praxis
-    upstream cluster? Should duplicates be rejected initially?
-12. **What is the credential rotation contract?** Do projected files reload
+9. **What is the credential rotation contract?** Do projected files reload
     in-process, or does Praxis require a controlled rollout? How do we prove
     no old key is used after revocation and no unrelated KServe route rolls?
-13. **Which external API formats are in scope?** The currently qualified
+10. **Which external API formats are in scope?** The currently qualified
     OpenAI Chat Completions path must not imply Responses, Anthropic, Azure or
     Vertex parity. What request/response transforms and provider-specific
     credential strategies are needed for each additional format?
-14. **How is a coherent revision activated across replicas?** Is a mounted
+11. **How is a coherent revision activated across replicas?** Is a mounted
     ConfigMap snapshot sufficient, or is an explicit generation/ack protocol
     needed before Gateway status changes? What happens to the previous serving
     revision on invalid config or partial rollout?
 
 ### Installation, trust and migration
 
-15. **What is the durable operator interface?** Which feature gate, related
+12. **What is the durable operator interface?** Which feature gate, related
     image, controller arguments, RBAC and Secret permissions are required for
     Praxis mode, including disconnected and managed RHOAI installations?
     Avoid a design that only works through run-owned Deployment patches.
-16. **How is the frontend moved without two active writers?** What exact
+13. **How is the frontend moved without two active writers?** What exact
     sequence changes a tenant Gateway from Envoy to Praxis, drains old
     connections, and rolls back without modifying user API keys, subscriptions
     or models? Is shadow configuration possible without advertising traffic?
-17. **What identity protects each in-cluster call?** Define verified TLS or
-    another authenticated transport for Praxis-to-Authorino, Limitador and
-    EPP, with certificate issuance/rotation and a concrete endpoint-spoofing
+14. **What identity protects each in-cluster call?** Define verified TLS or
+    another authenticated transport for Praxis-to-Authorino and Limitador,
+    with certificate issuance/rotation and a concrete endpoint-spoofing
     threat model. Do not repeat the old ExtProc `ACCEPT_UNTRUSTED` gap.
-18. **Can tenant Gateways remain dedicated?** The initial design follows the
-    current tenant isolation model. Would sharing one Praxis fleet change
-    Secret exposure, policy keys, failure domains or Gateway API ownership?
-    Do not optimize topology before this is measured.
-19. **What telemetry is part of the MaaS contract?** Identify the existing
+15. **What telemetry is part of the MaaS contract?** Identify the existing
     subject, subscription, tenant, model, provider, token and denial fields
     operators rely on, then compare Praxis logs/metrics/traces and audit
     retention. Which dimensions must survive the Envoy removal?
+
+## Longer-Term Consideration: InferencePool Scheduling
+
+MaaS's default KServe examples use an ordinary `LLMInferenceService` without
+an inference scheduler. The initial V3 replacement therefore forwards through
+the generated KServe Service and does not require EPP.
+
+InferencePool support becomes necessary when a KServe route uses an
+`InferencePool` backend. A Service cannot preserve that behavior by itself:
+the EPP owns request-aware selection of a ready model endpoint. To support
+those installations without Envoy, Praxis must implement the Gateway API
+Inference Extension interaction, ask the configured EPP to select an endpoint,
+validate that selection against the current pool, and connect directly to the
+selected endpoint.
+
+The preferred future direction is compatibility with the unmodified upstream
+llm-d inference scheduler. Its current interface uses the Envoy ExtProc wire
+protocol with full-duplex streamed request and response bodies. In this design,
+Praxis remains the client-facing proxy; ExtProc is only the Praxis-to-EPP
+scheduling protocol, not another proxy hop. Authorization and quota admission
+must complete before Praxis contacts EPP, and scheduler-specific body handling
+must not change buffering behavior for ordinary KServe Service or
+ExternalModel routes.
+
+This work is required before claiming parity for scheduler-enabled
+InferencePool deployments. It is not part of the initial even swap for MaaS's
+default no-scheduler KServe Service path. Future qualification should cover EPP
+authentication, endpoint validation, endpoint churn, EPP outage, streaming,
+and truthful InferencePool readiness.
 
 ## Source Links
 
