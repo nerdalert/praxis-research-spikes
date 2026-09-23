@@ -26,6 +26,14 @@ large-prompt body handling, GuideLLM simulator echo, and analysis.
 
 ## Other Demos
 
+### [MaaS/Praxis V3 Dataplane](demo/maas-praxis-v3/)
+
+Research demo for making Praxis the tenant-facing inference proxy while MaaS
+continues to own tenant, model, subscription, authorization, and quota intent.
+It covers KServe Service routing, InferencePool/EPP selection, and direct
+ExternalModel forwarding on one Praxis listener without an Envoy forwarding
+hop.
+
 ### [AI Grid Gateway-to-Gateway Demo](demo/ai-grid-gateway-to-gateway/)
 
 Validates the AI Grid multi-cluster data-plane architecture using three kind

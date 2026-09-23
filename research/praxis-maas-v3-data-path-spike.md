@@ -19,6 +19,58 @@ and Limitador authoritative and make Praxis consume their decisions through
 maintained, fail-closed adapters. Replacing those engines with Praxis-native
 policy or token limiting is a separate parity program.
 
+## Current Spike Findings
+
+**In short:** A private Kind spike has demonstrated the intended request shape,
+but its adapters and simulators are research artifacts rather than product
+implementations.
+
+The strongest current Kind evidence exercises one Praxis listener with three
+routes derived from live cluster state:
+
+- an ordinary KServe Service route;
+- a KServe InferencePool route using the real EPP protocol; and
+- an ExternalModel route using direct HTTPS provider forwarding.
+
+The observed request path is:
+
+```text
+Client -> Praxis -> Authorino -> Limitador
+       -> KServe Service, EPP-selected KServe endpoint, or ExternalModel provider
+```
+
+The selected paths do not contain an Envoy forwarding hop or a standalone
+ExtProc service. Praxis executes a native in-process filter pipeline for model
+classification, authorization/quota ordering, routing, credential handling,
+header removal, streaming, and final forwarding.
+
+The spike has demonstrated request authentication and entitlement decisions,
+shared request-count quota across two Praxis replicas, direct Service routing,
+EPP endpoint selection, ExternalModel credential replacement, SSE streaming,
+provider updates without a Praxis restart, and denial before backend contact.
+The KServe backend is currently a deterministic simulator rather than a real
+vLLM serving workload.
+
+Cold provisioning now derives the three routes from MaaS, Gateway API,
+Authorino, Limitador, KServe, and ExternalModel resources instead of starting
+with a hard-coded policy table. Provisioning waits for referenced resources
+and generated policy to converge before Praxis starts. While any model is
+incomplete, the snapshot reconciler retains the last complete revision rather
+than publishing a partially valid configuration.
+
+The following remain incomplete and must not be implied by a demo result:
+
+- the temporary authorization bridge is not a production integration;
+- token reservation and actual-usage settlement are not implemented;
+- provider credential deletion, restoration, and cleanup need complete
+  lifecycle evidence;
+- the manual V3 Gateway-parent compatibility patch must be removed in favor of
+  the existing `AITenant.status.gatewayRef` contract;
+- real KServe/vLLM, rollback, OpenShift, and RHOAI remain qualification work;
+  and
+- one final cold run must prove provisioning and the full request/lifecycle
+  suite together without manual resource patches.
+
 For KServe, Praxis must implement the Gateway API and InferencePool/EPP
 data-plane contract, including endpoint selection and truthful route status.
 For ExternalModels, Praxis can reuse the established provider resolution,
@@ -187,6 +239,31 @@ Do not infer token parity from a shared request-count 429. If the required
 reservation/settlement RPC or policy contract is absent, define the upstream
 change rather than inventing a second quota authority inside Praxis.
 
+### Embedded Limitador option
+
+The current spike calls the real Limitador RLS service through the temporary
+authorization bridge. A plausible production alternative is to embed the
+`limitador` Rust crate in a Praxis filter and connect it directly to a
+dedicated Redis or Valkey backend:
+
+```text
+Current spike: Praxis -> bridge -> Limitador server -> storage
+Possible target: Praxis -> embedded Limitador crate -> dedicated storage
+```
+
+The narrow prototype is likely a few focused engineering days. A production
+implementation is substantially more work: hot policy updates, atomic
+multi-replica enforcement, stacked user/model/subscription/tenant limits,
+counter-key compatibility, storage pooling, outage behavior, migration,
+telemetry, and concurrency qualification. Existing customers may depend on
+current counters and reset behavior, so this is not a greenfield replacement.
+
+Embedding the crate does not solve token reservation and settlement. That
+still needs a product contract for estimation, reservation, actual usage,
+cancellation, retries, duplicate settlement, streaming, and partial failure.
+The bridge should remain for the reproducible Kind demo while the embedded
+option is researched behind a separate feature flag and requirements document.
+
 ## KServe and InferencePool
 
 **In short:** Sending traffic to a KServe Service is straightforward. Matching
@@ -197,6 +274,53 @@ KServe does not need MaaS-specific Praxis code if Praxis implements the
 published Gateway API and Gateway API Inference Extension contracts. The
 controller must recognize its GatewayClass, compile listeners and HTTPRoutes,
 resolve Services and InferencePools, and report status based on loaded state.
+
+### Two V3 EPP integration options
+
+Both options remove Envoy from the selected inference path and remove Praxis
+as a separately deployed ExtProc service. They differ in the scheduler Praxis
+calls and in how much of the ExtProc stream that scheduler consumes.
+
+**Option 1: header-only LWEPP**
+
+```text
+Client -> Praxis native filter pipeline
+       -> modified LWEPP over header-only ExtProc
+       -> Praxis validates and connects to the selected endpoint
+```
+
+The current research implementation sets `request_body_mode=NONE` and asks
+LWEPP to select from request headers. This keeps EPP contact after
+authorization/quota admission and avoids sending the prompt body to the
+scheduler. Upstream LWEPP does not currently complete selection in this mode,
+so the spike carries changes for header-phase selection, KServe health-service
+names, and generated scheduler-argument compatibility. This option is smaller
+and deterministic, but creates a custom scheduler variant that must either be
+upstreamed or maintained.
+
+**Option 2: upstream llm-d EPP**
+
+```text
+Client -> Praxis native filter pipeline
+       -> upstream llm-d EPP over full-duplex streamed ExtProc
+       -> Praxis validates and connects to the selected endpoint
+```
+
+llm-d inference scheduler v0.9.0 expects full-duplex streamed ExtProc request
+and response bodies. Praxis remains the main proxy and acts only as the ExtProc
+client for scheduling; there is still no Envoy hop and no standalone Praxis
+ExtProc workload. The full-duplex processor must be invoked only after
+authentication, authorization, and quota admission so denied traffic never
+reaches EPP. Body streaming must be scoped to this scheduler call rather than
+changing the entire listener to buffered processing.
+
+Option 2 is the selected product direction. Qualification must first prove the
+contract against unmodified upstream llm-d; any incompatibility should be
+isolated before proposing an upstream change. This direction removes the
+custom Gateway API Inference Extension fork and qualifies the scheduler users
+are expected to deploy. Option 1 remains historical evidence and may remain a
+small deterministic test fixture, but it is not a required deployment
+component or the primary demo path.
 
 For an ordinary Service backend, Praxis resolves the Service and forwards to
 the configured port with the required path rewrite. That is the first routing
