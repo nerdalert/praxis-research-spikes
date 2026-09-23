@@ -323,6 +323,32 @@ until kubectl apply -f "$ROOT/external-maas-governance.yaml"; do
   sleep 2
 done
 
+# ExternalModel routing is owned by the AI Gateway controller.  Its runtime
+# resolver only accepts provider references whose persisted status is Ready;
+# do not wait for the later ExternalModel condition and hide a provider-schema,
+# namespace, Secret, or controller-image mismatch behind a generic timeout.
+capture_external_provider_diagnostics() {
+  local out="$EVIDENCE/external-provider-diagnostics"
+  mkdir -p "$out"
+  kubectl -n models-as-a-service get externalmodel praxis-external -o yaml > "$out/externalmodel.yaml" 2>&1 || true
+  kubectl -n models-as-a-service get externalprovider -o yaml > "$out/externalproviders.yaml" 2>&1 || true
+  kubectl -n models-as-a-service get secret provider-a-credentials provider-b-credentials provider-ca \
+    -o json 2>"$out/provider-secrets.err" |
+    jq 'del(.items[]?.data, .items[]?.stringData, .items[]?.metadata.managedFields, .items[]?.metadata.resourceVersion, .items[]?.metadata.uid, .items[]?.metadata.creationTimestamp)' \
+    > "$out/provider-secrets-sanitized.json" || true
+  kubectl -n models-as-a-service get events --sort-by=.lastTimestamp > "$out/events.txt" 2>&1 || true
+  kubectl -n maas-praxis-system get deployment ai-gateway-controller -o yaml > "$out/controller-deployment.yaml" 2>&1 || true
+  kubectl -n maas-praxis-system logs deployment/ai-gateway-controller --all-containers --tail=500 > "$out/controller.log" 2>&1 || true
+  kubectl -n models-as-a-service get maasmodelref praxis-external -o yaml > "$out/maasmodelref.yaml" 2>&1 || true
+  {
+    echo "ExternalModel provider references and persisted readiness:"
+    kubectl -n models-as-a-service get externalmodel praxis-external \
+      -o json | jq -r '.spec.externalProviderRefs[]? | [.ref.name, (.weight // 1)] | @tsv' || true
+    kubectl -n models-as-a-service get externalprovider \
+      -o json | jq -r '.items[] | [.metadata.namespace, .metadata.name, (.status.phase // "<missing>"), (.status.observedGeneration // 0), (.spec.endpoint // "<missing>"), (.spec.provider // "<missing>"), (.spec.auth.type // "<missing>"), (.spec.auth.secretRef.name // "<missing>")] | @tsv' || true
+  } > "$out/provider-resolution-summary.tsv"
+}
+
 # Start the snapshot compiler before waiting for ExternalModel readiness. The
 # controller needs the generated overlay to publish the ExternalModel route,
 # so waiting first creates a readiness deadlock.
@@ -330,6 +356,21 @@ STAGE=runtime-reconciler
 NAMESPACE=models-as-a-service INTERVAL=2 OUT_DIR="$EVIDENCE/runtime-reconciler" \
   "$ROOT/qualification/reconcile-runtime.sh" > "$EVIDENCE/runtime-reconciler.log" 2>&1 &
 RECONCILER_PID=$!
+
+provider_ready_deadline=$((SECONDS + 60))
+provider_ready=false
+while (( SECONDS < provider_ready_deadline )); do
+  provider_ready=$(kubectl -n models-as-a-service get externalprovider provider-a provider-b -o json 2>/dev/null |
+    jq -e '(.items | length == 2) and all(.items[]; .status.phase == "Ready" and (.status.observedGeneration // 0) >= (.metadata.generation // 0))' >/dev/null && echo true || echo false)
+  [[ "$provider_ready" == true ]] && break
+  sleep 2
+done
+if [[ "$provider_ready" != true ]]; then
+  capture_external_provider_diagnostics
+  echo "EXTERNAL_PROVIDER_NOT_READY: provider refs must resolve to Ready providers before ExternalModel routing" >&2
+  cat "$EVIDENCE/external-provider-diagnostics/provider-resolution-summary.tsv" >&2 || true
+  exit 1
+fi
 
 STAGE=generated-policy
 kubectl wait --for=condition=Ready llminferenceservice/praxis-sim -n llm-internal --timeout=300s || true
