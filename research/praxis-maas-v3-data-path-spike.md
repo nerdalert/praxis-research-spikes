@@ -217,9 +217,11 @@ equivalent to MaaS-generated Limitador policy. Its Valkey-backed shared bucket
 is useful research, but does not by itself prove MaaS token reservation,
 settlement, outage, or policy-update parity.
 
-V3 requires maintained Authorino and Limitador adapters driven by generated
-MaaS policy. A manually configured intermediary does not provide a durable
-policy lifecycle or establish product parity.
+The initial even-swap implementation can retain Authorino and Limitador through
+maintained integrations driven by generated MaaS policy. A manually configured
+intermediary does not provide a durable policy lifecycle or establish product
+parity. The final integration shape remains a product decision tied to the
+Praxis policy and tokenomics designs.
 
 ### Quota detail
 
@@ -311,8 +313,12 @@ In Praxis filter terms, the prototype currently maps these stages to
 callout with terminal 401/403/429 branches, request-header removal,
 `path_rewrite`, and the final upstream `load_balancer`. The policy callout
 currently reaches Authorino and Limitador through a prototype bridge. The
-production design needs maintained adapters for those existing policy engines;
-the bridge itself is not part of the target architecture.
+bridge itself is not the proposed production integration. Its replacement
+depends on the Praxis policy and tokenomics decisions: Praxis may call the
+existing services directly, embed reusable enforcement components such as the
+Limitador crate, or adopt native implementations after MaaS behavioral and
+counter compatibility are demonstrated. This document does not select among
+those options.
 
 Praxis must recognize its GatewayClass, compile the required listeners and
 HTTPRoutes, resolve Service references, perform the required path rewrite, and
@@ -472,9 +478,9 @@ rollback qualification.
 **In short:** Complete and qualify the default MaaS KServe Service and
 ExternalModel paths before expanding the dataplane scope.
 
-1. **Policy compatibility:** generic, maintained Authorino `ext_authz` and
-   Limitador adapters; generated-policy translation; denial and header
-   mutation equivalence. Keep MaaS policy authority.
+1. **Policy compatibility:** replace the prototype bridge with the selected
+   Praxis policy/tokenomics integration; translate generated policy and prove
+   denial, counter and header-mutation equivalence. Keep MaaS policy authority.
 2. **Gateway compiler and Service route:** Praxis GatewayClass/listener,
    HTTPRoute, ReferenceGrant and ordinary KServe Service backend with truthful
    conditions and no Envoy hop.
