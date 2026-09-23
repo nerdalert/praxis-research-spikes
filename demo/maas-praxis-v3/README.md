@@ -55,60 +55,49 @@ The demo must identify the temporary authorization bridge and simulated KServe
 backend as research components. Request-count quota must not be presented as
 token reservation or settlement.
 
-## Image Strategy
+## Image strategy
 
-Use immutable, multi-architecture GHCR images for spike-owned code. This keeps
-the demo reproducible and avoids lengthy local Rust and Go builds. Preserve an
-explicit source-build mode for contributors and CI validation.
+The demo deploys only immutable `name@sha256:digest` references. There are no
+tag defaults, `latest` fallbacks, or implicit local builds. Every digest is a
+required input and is recorded with its source branch and commit before the
+run starts. Unchanged infrastructure remains on its pinned upstream release
+images and is not republished as a spike image.
 
-The provisioner must require an explicit digest-pinned reference for every
-spike-owned image. It must reject an unset reference, a tag-only reference, or
-`latest`; it must not silently build a local replacement. The image reference,
-resolved digest, source repository, source branch, and source commit must be
-written to sanitized evidence before qualification begins.
+| Image | Purpose | Source branch | Digest |
+| --- | --- | --- | --- |
+| `ghcr.io/nerdalert/praxis` | Praxis plus the AI dataplane build | [`nerdalert/ai@praxis-maas-dp3-poc`](https://github.com/nerdalert/ai/tree/praxis-maas-dp3-poc) | `sha256:ca819d26f16bb04949c773248b34ca3eb56f58c20406bb47f396319f3c6a10df` |
+| `ghcr.io/nerdalert/praxis-maas-authz-bridge` | Temporary Authorino/Limitador POC adapter | [research-spikes `main`](https://github.com/nerdalert/praxis-research-spikes/tree/main) | `sha256:ab62af696f9e071f9edfcd1666b7d066ec330d80325d4ed18c89968d93767e0c` |
+| `ghcr.io/nerdalert/maas-praxis-v3-provider-fixture` | Deterministic HTTPS Provider A/B fixture | [research-spikes `main`](https://github.com/nerdalert/praxis-research-spikes/tree/main) | required run input: `PROVIDER_FIXTURE_IMAGE` |
+| `ghcr.io/nerdalert/maas-praxis-v3-ai-gateway-controller` | V3 ExternalModel/Gateway controller build | [`ai-gateway-controller@main`](https://github.com/nerdalert/ai-gateway-controller/tree/main) | required run input: `AI_GATEWAY_CONTROLLER_IMAGE` |
+| `ghcr.io/nerdalert/maas-praxis-v3-runtime-reconciler` | Temporary in-cluster snapshot compiler | [research-spikes `main`](https://github.com/nerdalert/praxis-research-spikes/tree/main) | required run input: `RUNTIME_RECONCILER_IMAGE` |
 
-The Praxis AI image prepared for this branch is:
+The two published digests above are the currently qualified images. The other
+three image references are intentionally incomplete until their public image
+digests are published; a qualification must fail closed if any is absent.
+Build and publish those images from the linked source branch, then pass the
+resulting digest-pinned references explicitly. The evidence must include the
+image reference, source repository, branch, commit, and observed Pod digest.
 
-```text
-repository: https://github.com/nerdalert/ai
-branch:     praxis-maas-dp3-poc
-commit:     ab6847b3a0ca2e15ac34b80ff858705853e5d012
-image:      ghcr.io/nerdalert/praxis@sha256:ca819d26f16bb04949c773248b34ca3eb56f58c20406bb47f396319f3c6a10df
-```
-
-Use it explicitly for a qualification run, for example:
+For the currently qualified Praxis image:
 
 ```bash
 export PRAXIS_AI_IMAGE='ghcr.io/nerdalert/praxis@sha256:ca819d26f16bb04949c773248b34ca3eb56f58c20406bb47f396319f3c6a10df'
 ```
 
-The value above is an example of an explicit run input, not a hidden default.
-The qualification must continue to require `PRAXIS_AI_IMAGE` to be set.
+## Code branches
 
-Required spike images:
+These are the fork branches that define the changed source surface for the
+spike. The remaining Kubernetes, KServe, Gateway API, Authorino, Kuadrant, and
+Limitador components are unchanged upstream dependencies.
 
-1. `ghcr.io/nerdalert/praxis@sha256:ca819d26f16bb04949c773248b34ca3eb56f58c20406bb47f396319f3c6a10df`
-   - Praxis plus the Praxis AI changes used by this spike.
-2. `ghcr.io/nerdalert/praxis-maas-authz-bridge@sha256:ab62af696f9e071f9edfcd1666b7d066ec330d80325d4ed18c89968d93767e0c`
-   - Temporary Authorino/Limitador adapter used only by the demo.
-3. `ghcr.io/nerdalert/maas-praxis-v3-provider-fixture@sha256:<provider-fixture-digest>`
-   - Deterministic HTTPS ExternalModel Provider A/B fixture.
-4. `ghcr.io/nerdalert/maas-praxis-v3-ai-gateway-controller@sha256:<controller-digest>`
-   - Controller build containing the V3 spike changes needed by the demo.
-5. `ghcr.io/nerdalert/maas-praxis-v3-runtime-reconciler@sha256:<reconciler-digest>`
-   - Temporary in-cluster snapshot compiler. This replaces the current
-     host-running reconciliation script for a portable demo and is not the
-     intended product implementation.
-
-Unmodified infrastructure images, including MaaS, Authorino, Limitador,
-KServe, cert-manager, Istio, MetalLB, PostgreSQL, and the inference simulator,
-should use their official registries and immutable digests. Do not republish
-unchanged third-party images merely for convenience.
-
-Every image variable must accept only a digest-pinned override. The demo must
-print the final `name@sha256:digest` for each image and verify that the running
-Pods use that digest. Tags may be used only as an operator input to resolve a
-digest before deployment; they must never be the evidence or deployment form.
+| Repository branch | Role |
+| --- | --- |
+| [`nerdalert/praxis@main`](https://github.com/nerdalert/praxis/tree/main) | Praxis core |
+| [`nerdalert/ai@praxis-maas-dp3-poc`](https://github.com/nerdalert/ai/tree/praxis-maas-dp3-poc) | Praxis AI dataplane integration |
+| [`nerdalert/ai-gateway-controller@main`](https://github.com/nerdalert/ai-gateway-controller/tree/main) | ExternalModel and Gateway reconciliation |
+| [`nerdalert/ai-gateway-operator@main`](https://github.com/nerdalert/ai-gateway-operator/tree/main) | Product packaging fork; currently private or not published |
+| [`nerdalert/models-as-a-service@main`](https://github.com/nerdalert/models-as-a-service/tree/main) | MaaS control-plane source |
+| [`nerdalert/praxis-research-spikes@main`](https://github.com/nerdalert/praxis-research-spikes/tree/main) | This demo and research artifacts |
 
 ## Provider and route identity
 
