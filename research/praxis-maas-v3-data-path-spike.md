@@ -274,13 +274,45 @@ no-scheduler `LLMInferenceService`.
 ```text
 Client
     -> Praxis tenant gateway
+       - terminates client TLS
+       - matches the tenant listener and inference route
+       - bounds request-body inspection
+    -> Praxis model classification
+       - reads the client-visible model from the supported request format
+       - replaces any caller-supplied internal model or routing headers
+       - stores the trusted model identity for policy and routing
     -> Authorino authentication and model authorization
+       - validates the MaaS API key
+       - resolves the caller, tenant, subscription and model entitlement
+       - returns 401 or 403 without backend contact when denied
     -> Limitador quota check
-    -> Praxis applies the KServe HTTPRoute path rewrite
-    -> KServe-generated model Service
-    -> Model-serving pod, such as vLLM
-    -> Praxis streams the response to the client
+       - evaluates the MaaS-generated quota descriptors
+       - returns 429 without backend contact when exhausted
+    -> Praxis selects the authorized KServe route
+       - resolves the MaaSModelRef to the LLMInferenceService route
+       - selects the HTTPRoute rule whose backendRef is the generated model Service
+       - does not use unrelated rules from the same HTTPRoute
+    -> Praxis prepares the upstream request
+       - removes the caller Authorization, x-api-key and internal routing headers
+       - applies the URL rewrite from the selected KServe HTTPRoute rule
+       - preserves the remaining request method, body and required headers
+    -> Praxis opens the upstream connection
+       - uses the compiled Service DNS name and port
+       - forwards to the KServe-generated model Service
+    -> KServe routes to the model-serving pod, such as vLLM
+    -> Praxis streams the model response to the client
+       - preserves response status, headers and SSE chunk ordering
+       - avoids buffering the complete response
+       - propagates cancellation and handles upstream failure
 ```
+
+In Praxis filter terms, the prototype currently maps these stages to
+`model_to_header` and `llmisvc_model_provider_resolver`, a fail-closed policy
+callout with terminal 401/403/429 branches, request-header removal,
+`path_rewrite`, and the final upstream `load_balancer`. The policy callout
+currently reaches Authorino and Limitador through a prototype bridge. The
+production design needs maintained adapters for those existing policy engines;
+the bridge itself is not part of the target architecture.
 
 Praxis must recognize its GatewayClass, compile the required listeners and
 HTTPRoutes, resolve Service references, perform the required path rewrite, and
