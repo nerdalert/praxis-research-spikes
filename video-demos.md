@@ -32,7 +32,7 @@ https://github.com/user-attachments/assets/32fc68cc-e866-4a8b-a486-3f621364dd7e
 
 https://github.com/user-attachments/assets/4fc6f22a-a025-4379-8513-21ee0c6ab156
 
-## Praxis AGN/Grid with Dynamo
+## Praxis AGN/Grid with Signals-Based Integration with Dynamo
 
 https://github.com/user-attachments/assets/2f1edf83-014a-457c-936b-e1a2cd62c6ae
 
